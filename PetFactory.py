@@ -1,104 +1,14 @@
-import ctypes
-from ctypes import wintypes
-import struct
+"""
+Pet Factory - Main GUI Application
+Manages the user interface and coordinates pet management operations
+"""
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
 
-# Windows API constants
-PROCESS_VM_READ = 0x0010
-PROCESS_QUERY_INFORMATION = 0x0400
-TH32CS_SNAPPROCESS = 0x00000002
-TH32CS_SNAPMODULE = 0x00000008
-TH32CS_SNAPMODULE32 = 0x00000010
-
-class PROCESSENTRY32(ctypes.Structure):
-    _fields_ = [
-        ("dwSize", wintypes.DWORD),
-        ("cntUsage", wintypes.DWORD),
-        ("th32ProcessID", wintypes.DWORD),
-        ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
-        ("th32ModuleID", wintypes.DWORD),
-        ("cntThreads", wintypes.DWORD),
-        ("th32ParentProcessID", wintypes.DWORD),
-        ("pcPriClassBase", wintypes.LONG),
-        ("dwFlags", wintypes.DWORD),
-        ("szExeFile", ctypes.c_char * 260)
-    ]
-
-class MODULEENTRY32(ctypes.Structure):
-    _fields_ = [
-        ("dwSize", wintypes.DWORD),
-        ("th32ModuleID", wintypes.DWORD),
-        ("th32ProcessID", wintypes.DWORD),
-        ("GlblcntUsage", wintypes.DWORD),
-        ("ProccntUsage", wintypes.DWORD),
-        ("modBaseAddr", ctypes.POINTER(ctypes.c_byte)),
-        ("modBaseSize", wintypes.DWORD),
-        ("hModule", wintypes.HMODULE),
-        ("szModule", ctypes.c_char * 256),
-        ("szExePath", ctypes.c_char * 260)
-    ]
-
-kernel32 = ctypes.windll.kernel32
-
-def get_all_process_ids(process_name):
-    """Get all PIDs for Origin.exe"""
-    pids = []
-    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-    if snapshot == -1:
-        return pids
-    
-    pe32 = PROCESSENTRY32()
-    pe32.dwSize = ctypes.sizeof(PROCESSENTRY32)
-    
-    if kernel32.Process32First(snapshot, ctypes.byref(pe32)):
-        while True:
-            if pe32.szExeFile.decode('ascii', errors='ignore').lower() == process_name.lower():
-                pids.append(pe32.th32ProcessID)
-            if not kernel32.Process32Next(snapshot, ctypes.byref(pe32)):
-                break
-    
-    kernel32.CloseHandle(snapshot)
-    return pids
-
-def get_module_base_address(pid):
-    """Get base address of Origin.exe module"""
-    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid)
-    if snapshot == -1:
-        return 0
-    
-    me32 = MODULEENTRY32()
-    me32.dwSize = ctypes.sizeof(MODULEENTRY32)
-    
-    base_addr = 0
-    if kernel32.Module32First(snapshot, ctypes.byref(me32)):
-        base_addr = ctypes.cast(me32.modBaseAddr, ctypes.c_void_p).value
-    
-    kernel32.CloseHandle(snapshot)
-    return base_addr
-
-def read_player_name(pid, base_address):
-    """Read player name from memory"""
-    handle = kernel32.OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, False, pid)
-    if not handle:
-        return "[Access Denied]"
-    
-    # Offset from CheatEngine
-    offset = 0x11B6158
-    address = base_address + offset
-    
-    buffer = ctypes.create_string_buffer(256)
-    bytes_read = ctypes.c_size_t(0)
-    
-    name = "[Unable to read]"
-    if kernel32.ReadProcessMemory(handle, ctypes.c_void_p(address), buffer, 256, ctypes.byref(bytes_read)):
-        try:
-            name = buffer.value.decode('ascii', errors='ignore').strip('\x00')
-        except:
-            pass
-    
-    kernel32.CloseHandle(handle)
-    return name if name else "[Unable to read]"
+# Import custom modules
+from memory_reader import get_all_process_ids, get_module_base_address, read_player_name
+from pet_analyzer import analyze_pets
+from pet_manager import start_pet_management, format_management_results
 
 
 class PetFactoryGUI:
@@ -121,6 +31,7 @@ class PetFactoryGUI:
         
         # Variables
         self.accounts = {}  # {pid: {'name': str, 'track': BooleanVar}}
+        self.analysis_results = {}  # Store analysis results for Start to use
         
         # Header
         header_frame = tk.Frame(root, bg=self.bg_medium, pady=15)
@@ -262,11 +173,10 @@ class PetFactoryGUI:
             messagebox.showerror("Error", "Invalid Objective EXP value!")
             return
         
-        # TODO: Implement pet management process
-        messagebox.showinfo("In Progress", 
-                          f"Starting pet management for {len(tracked)} account(s)\n"
-                          f"Objective EXP: {objective_exp:,}\n\n"
-                          "Feature coming soon...")
+        # Start pet management process
+        results = start_pet_management(tracked, self.accounts, objective_exp)
+        message = format_management_results(results, objective_exp)
+        messagebox.showinfo("Pet Management", message)
     
     def on_analyze(self):
         """Handle Analyze button click"""
@@ -277,10 +187,20 @@ class PetFactoryGUI:
             messagebox.showwarning("Warning", "No accounts selected for tracking!")
             return
         
-        # TODO: Implement pet analysis
-        messagebox.showinfo("In Progress", 
-                          f"Analyzing pets for {len(tracked)} account(s)\n\n"
-                          "Feature coming soon...")
+        # Analyze pets
+        self.analysis_results = analyze_pets(tracked, self.accounts)
+        
+        # Check if analysis was successful
+        successful = sum(1 for r in self.analysis_results.values() if not r.get('error', True))
+        
+        if successful > 0:
+            messagebox.showinfo("Analysis Complete", 
+                              f"Successfully analyzed {successful} account(s).\n"
+                              f"Data ready for pet management.")
+        else:
+            messagebox.showerror("Analysis Failed", 
+                               "Could not analyze any accounts.\n"
+                               "Please check that Origin.exe is running.")
 
 
 def main():
