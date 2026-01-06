@@ -5,6 +5,8 @@ Manages the user interface and coordinates pet management operations
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
 from datetime import datetime
+import os
+import sys
 
 # Import custom modules
 from memory_reader import get_all_process_ids, get_module_base_address, read_player_name
@@ -24,6 +26,7 @@ class PetFactoryGUI:
         self.bg_light = "#3d3d3d"
         self.accent_green = "#00ff88"
         self.accent_blue = "#00b4ff"
+        self.accent_orange = "#ff8800"
         self.text_color = "#e0e0e0"
         self.text_secondary = "#a0a0a0"
         
@@ -178,14 +181,29 @@ class PetFactoryGUI:
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
         
+        # Buttons frame at bottom
+        bottom_buttons = tk.Frame(parent, bg=self.bg_dark)
+        bottom_buttons.pack(pady=(10, 0), fill=tk.X)
+        
         # Clear logs button
-        clear_btn = tk.Button(parent, text="Clear Logs",
+        clear_btn = tk.Button(bottom_buttons, text="Clear Logs",
                              command=self.clear_logs,
                              bg=self.bg_light, fg=self.text_color,
                              font=("Segoe UI", 10),
                              relief=tk.FLAT,
                              cursor="hand2")
-        clear_btn.pack(pady=(10, 0))
+        clear_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Restart button
+        restart_btn = tk.Button(bottom_buttons, text="🔄 Restart",
+                               command=self.restart_app,
+                               bg=self.accent_orange, fg="#000000",
+                               font=("Segoe UI", 10, "bold"),
+                               relief=tk.FLAT,
+                               cursor="hand2",
+                               activebackground="#ff9933",
+                               activeforeground="#000000")
+        restart_btn.pack(side=tk.LEFT)
         
         # Initial log
         self.log("Pet Factory initialized")
@@ -206,6 +224,12 @@ class PetFactoryGUI:
         self.log_text.delete(1.0, tk.END)
         self.log_text.config(state=tk.DISABLED)
         self.log("Logs cleared")
+    
+    def restart_app(self):
+        """Restart the application"""
+        self.log("Restarting application...")
+        self.root.destroy()
+        os.execv(sys.executable, [sys.executable] + sys.argv)
     
     def refresh_accounts(self):
         """Refresh the list of Origin.exe processes"""
@@ -360,10 +384,19 @@ class PetFactoryGUI:
             messagebox.showwarning("Warning", "No accounts selected for tracking!")
             return
         
+        # Get objective values
+        try:
+            objective_exp = int(self.objective_exp_var.get()) if self.objective_exp_var.get() else None
+            objective_level = int(self.objective_level_var.get()) if self.objective_level_var.get() else None
+        except ValueError:
+            self.log("Invalid objective values, analyzing without upgrades")
+            objective_exp = None
+            objective_level = None
+        
         self.log(f"Starting analysis for {len(tracked)} account(s)...")
         
-        # Analyze pets
-        self.analysis_results = analyze_pets(tracked, self.accounts)
+        # Analyze pets with objectives
+        self.analysis_results = analyze_pets(tracked, self.accounts, objective_exp, objective_level)
         
         # Check if analysis was successful
         successful = sum(1 for r in self.analysis_results.values() if not r.get('error', True))

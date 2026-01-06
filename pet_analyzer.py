@@ -33,9 +33,12 @@ CARRY_COORD = (183, 485)
 DETAILS_COORD = (278, 486)
 SAVE_COORD = (287, 580)
 CLOSE_PET_COORD = (400, 105)
+UPGRADE_COORD = (282, 555)
 
 # Settings
 CLICK_DELAY = 0.7  # 700ms delay between clicks
+UPGRADE_CLICKS = 30
+UPGRADE_CLICK_DELAY = 0.2
 PETEXP_FILE_PATH = r"C:\Godswar Origin\Localization\en_us\Settings\User"
 
 # Global stop flag
@@ -170,6 +173,44 @@ def minimize_window(hwnd):
     time.sleep(0.3)
 
 
+def upgrade_pet_levels(window, pet_index):
+    """
+    Upgrade a pet's level 30 times
+    
+    Args:
+        window: pygetwindow Window object
+        pet_index: Index of the pet (0-7)
+    
+    Returns:
+        bool: Success status
+    """
+    # Click on pet
+    pet_x, pet_y = PET_COORDINATES[pet_index]
+    if not click_at_window_position(window, pet_x, pet_y):
+        return False
+    
+    # Click on Details
+    if not click_at_window_position(window, *DETAILS_COORD):
+        return False
+    
+    # Click upgrade button 30 times
+    for i in range(UPGRADE_CLICKS):
+        if check_stop():
+            return False
+        screen_x = window.left + UPGRADE_COORD[0]
+        screen_y = window.top + UPGRADE_COORD[1]
+        pyautogui.moveTo(screen_x, screen_y, duration=0.1)
+        time.sleep(0.1)
+        pyautogui.click(screen_x, screen_y)
+        time.sleep(UPGRADE_CLICK_DELAY)
+    
+    # Close pet
+    if not click_at_window_position(window, *CLOSE_PET_COORD):
+        return False
+    
+    return True
+
+
 def process_single_pet(window, pet_index):
     """
     Process a single pet (click through the UI sequence)
@@ -255,13 +296,29 @@ def delete_petexp_file(file_path):
         pass
 
 
-def analyze_pets(tracked_accounts, accounts_info):
+def delete_petalert_file(file_path):
+    """
+    Delete the petalert file
+    
+    Args:
+        file_path (str): Path to the petalert file
+    """
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except:
+        pass
+
+
+def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_level=None):
     """
     Analyze pets for selected accounts
     
     Args:
         tracked_accounts (list): List of PIDs to analyze
         accounts_info (dict): Dictionary with account information {pid: {'name': str, ...}}
+        objective_exp (int): Optional target EXP for upgrading pets
+        objective_level (int): Optional target level for upgrading pets
     
     Returns:
         dict: Analysis results with pet information for each account
@@ -342,8 +399,38 @@ def analyze_pets(tracked_accounts, accounts_info):
         petexp_file = os.path.join(PETEXP_FILE_PATH, f"{account_name}_petexp.txt")
         pets_data = parse_petexp_file(petexp_file)
         
-        # Delete the petexp file
+        # If objectives provided, upgrade pets that need it
+        if objective_exp and objective_level and pets_data:
+            pets_to_upgrade = []
+            best_pet_index = None
+            best_pet_exp = -1
+            
+            for i, pet in enumerate(pets_data):
+                # Check if pet has EXP but not level
+                if pet['current_exp'] >= objective_exp and pet['level'] < objective_level:
+                    pets_to_upgrade.append(i)
+                # Track best pet for carry
+                elif pet['current_exp'] < objective_exp and pet['level'] < objective_level:
+                    if pet['current_exp'] > best_pet_exp:
+                        best_pet_exp = pet['current_exp']
+                        best_pet_index = i
+            
+            # Upgrade pets that need it (pet tab is still open from analysis)
+            if pets_to_upgrade:
+                for pet_index in pets_to_upgrade:
+                    if not upgrade_pet_levels(window, pet_index):
+                        break
+            
+            # Set best pet to carry if found
+            if best_pet_index is not None:
+                pet_x, pet_y = PET_COORDINATES[best_pet_index]
+                click_at_window_position(window, pet_x, pet_y)
+                click_at_window_position(window, *CARRY_COORD)
+        
+        # Delete the petexp and petalert files
         delete_petexp_file(petexp_file)
+        petalert_file = os.path.join(PETEXP_FILE_PATH, f"{account_name}_petalert.txt")
+        delete_petalert_file(petalert_file)
         
         # Close the pet window by clicking on Pet tab again
         click_at_window_position(window, *PET_TAB_COORD)
