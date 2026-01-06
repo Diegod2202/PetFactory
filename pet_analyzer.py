@@ -12,6 +12,7 @@ import os
 import re
 from pathlib import Path
 import keyboard
+from file_cleaner import clean_pet_files
 
 
 # Pet coordinates (relative to window)
@@ -185,10 +186,6 @@ def process_single_pet(window, pet_index):
     if not click_at_window_position(window, pet_x, pet_y):
         return False
     
-    # Click on Carry
-    if not click_at_window_position(window, *CARRY_COORD):
-        return False
-    
     # Click on Details
     if not click_at_window_position(window, *DETAILS_COORD):
         return False
@@ -272,6 +269,9 @@ def analyze_pets(tracked_accounts, accounts_info):
     global should_stop
     reset_stop_flag()
     setup_stop_hotkey()
+    
+    # Clean up any existing pet files before starting
+    clean_pet_files()
     
     results = {}
     
