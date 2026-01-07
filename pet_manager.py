@@ -379,7 +379,6 @@ def start_pet_management(tracked_accounts, accounts_info, objective_exp, objecti
     """
     global is_paused, management_active
     reset_stop_flag()
-    setup_stop_hotkey()
     management_active = True
     
     # Use provided path or default
@@ -462,7 +461,6 @@ def start_pet_management(tracked_accounts, accounts_info, objective_exp, objecti
         time.sleep(1)
     
     management_active = False
-    keyboard.remove_hotkey('d+f')
     
     # Return results
     results = {}

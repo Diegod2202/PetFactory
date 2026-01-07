@@ -1,0 +1,16 @@
+# PetFactory Dependencies
+# Python 3.12+
+
+# GUI
+# (tkinter is included with Python)
+
+# Windows API
+pywin32==311
+
+# GUI Automation
+pyautogui==0.9.54
+PyGetWindow==0.0.9
+keyboard==0.13.5
+
+# System utilities
+psutil==7.1.3

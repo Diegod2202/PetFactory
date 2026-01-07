@@ -75,10 +75,26 @@ class PetFactoryGUI:
     def _setup_global_hotkeys(self):
         """Setup global hotkeys for the application"""
         try:
+            # D+Q to quit
             keyboard.add_hotkey('d+q', self._quit_app)
-            self.log("Hotkey registered: D+Q to quit application")
+            # D+F to pause/resume
+            keyboard.add_hotkey('d+f', self._toggle_pause)
+            self.log("Hotkeys registered: D+F pause/resume | D+Q quit")
         except Exception as e:
-            self.log(f"Warning: Could not register D+Q hotkey: {e}")
+            self.log(f"Warning: Could not register hotkeys: {e}")
+    
+    def _toggle_pause(self):
+        """Toggle pause state for analyzer and manager"""
+        # Import here to avoid circular dependency
+        import pet_analyzer
+        import pet_manager
+        
+        # Toggle both modules
+        pet_analyzer.is_paused = not pet_analyzer.is_paused
+        pet_manager.is_paused = pet_analyzer.is_paused
+        
+        state = "PAUSED" if pet_analyzer.is_paused else "RESUMED"
+        self.log(f"⏸️ Process {state}" if pet_analyzer.is_paused else f"▶️ Process {state}")
     
     def _quit_app(self):
         """Quit the application"""

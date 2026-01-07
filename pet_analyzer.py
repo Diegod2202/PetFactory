@@ -340,7 +340,6 @@ def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_
     """
     global is_paused
     reset_stop_flag()
-    setup_stop_hotkey()
     
     # Use provided path or default
     petexp_path = game_folder_path if game_folder_path else PETEXP_FILE_PATH
@@ -501,7 +500,6 @@ def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_
             'error': False
         }
     
-    keyboard.remove_hotkey('d+f')
     return results
 
 
