@@ -313,6 +313,8 @@ class PetFactoryGUI:
                 account['status_label'].config(fg=self.text_secondary)
             elif status == "Analyzing":
                 account['status_label'].config(fg=self.accent_blue)
+            elif status == "Analyzed":
+                account['status_label'].config(fg="#ffcc00")  # Yellow/gold for analyzed
             elif status == "Running":
                 account['status_label'].config(fg=self.accent_green)
             elif status == "Complete":
@@ -324,6 +326,7 @@ class PetFactoryGUI:
         
         if pets_done is not None:
             account['pets_done'] = pets_done
+            # During analysis, show progress; during management, show completed
             account['pets_done_label'].config(text=f"{pets_done}/8")
     
     def on_disconnect_detected(self, pid, message):
@@ -408,7 +411,7 @@ class PetFactoryGUI:
         tk.Label(header_frame, text="Pets Done", font=("Segoe UI", 11, "bold"), 
                 width=10, bg=self.bg_medium, fg=self.text_secondary).pack(side=tk.LEFT)
         tk.Label(header_frame, text="Status", font=("Segoe UI", 11, "bold"), 
-                width=15, bg=self.bg_medium, fg=self.text_secondary).pack(side=tk.LEFT)
+                width=12, bg=self.bg_medium, fg=self.text_secondary).pack(side=tk.LEFT)
         tk.Label(header_frame, text="Track", font=("Segoe UI", 11, "bold"), 
                 width=8, bg=self.bg_medium, fg=self.text_secondary).pack(side=tk.LEFT)
         
@@ -434,7 +437,7 @@ class PetFactoryGUI:
             
             # Status label
             status_label = tk.Label(account_frame, text="Idle", font=("Segoe UI", 10),
-                                   width=15, bg=row_bg, fg=self.text_secondary)
+                                   width=12, bg=row_bg, fg=self.text_secondary)
             status_label.pack(side=tk.LEFT)
             
             # Track checkbox
@@ -504,9 +507,32 @@ class PetFactoryGUI:
             
             if analyze_first:
                 self.log("Starting pet analysis...")
-                # Run analysis with game folder
-                analysis_results = analyze_pets(tracked, self.accounts, game_folder_path=game_folder)
+                
+                # Mark all tracked accounts as Analyzing
+                for pid in tracked:
+                    self.update_account_status(pid, status="Analyzing", pets_done=0)
+                
+                # Run analysis with game folder and GUI callback
+                analysis_results = analyze_pets(tracked, self.accounts, objective_exp, objective_level,
+                                              game_folder_path=game_folder, gui_callback=self)
                 self.analysis_results = analysis_results
+                
+                # Update final status for all accounts
+                for pid, result in analysis_results.items():
+                    if result.get('error'):
+                        self.update_account_status(pid, status="Error", pets_done=0)
+                        self.log(f"❌ {result['name']}: {result['status']}")
+                    else:
+                        # Count pets that are already at objective level or exp
+                        completed_count = 0
+                        if result.get('pets'):
+                            for pet in result['pets']:
+                                if pet['level'] >= objective_level or pet['current_exp'] >= objective_exp:
+                                    completed_count += 1
+                        
+                        pets_count = len(result.get('pets', []))
+                        self.update_account_status(pid, status="Analyzed", pets_done=completed_count)
+                        self.log(f"✓ {result['name']}: Analysis complete ({pets_count}/8 pets found, {completed_count} ready)")
                 
                 # Check if analysis was successful
                 successful = sum(1 for r in analysis_results.values() if not r.get('error', True))
@@ -591,21 +617,28 @@ class PetFactoryGUI:
         # Update final status for all accounts
         for pid, result in self.analysis_results.items():
             if result.get('error'):
-                self.update_account_status(pid, status="Error")
+                self.update_account_status(pid, status="Error", pets_done=0)
                 self.log(f"❌ {result['name']}: {result['status']}")
             else:
+                # Count pets that are already at objective level or exp
+                completed_count = 0
+                if result.get('pets'):
+                    for pet in result['pets']:
+                        if pet['level'] >= objective_level or pet['current_exp'] >= objective_exp:
+                            completed_count += 1
+                
                 pets_count = len(result.get('pets', []))
-                self.update_account_status(pid, status="Complete", pets_done=pets_count)
-                self.log(f"✓ {result['name']}: {pets_count}/8 pets analyzed")
+                self.update_account_status(pid, status="Analyzed", pets_done=completed_count)
+                self.log(f"✓ {result['name']}: Analysis complete ({pets_count}/8 pets found, {completed_count} ready)")
         
         # Check if analysis was successful
         successful = sum(1 for r in self.analysis_results.values() if not r.get('error', True))
         
         if successful > 0:
-            self.log(f"Analysis complete: {successful} account(s) successful")
-            self.log("Data ready for pet management")
+            self.log(f"Analysis complete: {successful} account(s) analyzed")
+            self.log("✓ Ready for Start - Pets will be managed based on analysis data")
         else:
-            self.log("Analysis failed for all accounts")
+            self.log("❌ Analysis failed for all accounts")
             messagebox.showerror("Analysis Failed", 
                                "Could not analyze any accounts.\n"
                                "Please check that Origin.exe is running.")

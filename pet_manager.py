@@ -14,6 +14,9 @@ import keyboard
 import threading
 from file_cleaner import clean_pet_files
 
+# Disable PyAutoGUI fail-safe
+pyautogui.FAILSAFE = False
+
 
 # Pet coordinates (relative to window)
 PET_COORDINATES = [
@@ -126,6 +129,12 @@ def click_at_window_position(window, rel_x, rel_y, delay=None, button='left'):
     
     screen_x = window.left + rel_x
     screen_y = window.top + rel_y
+    
+    # Validate coordinates are within screen bounds
+    screen_width, screen_height = pyautogui.size()
+    if screen_x < 0 or screen_x >= screen_width or screen_y < 0 or screen_y >= screen_height:
+        print(f"Warning: Click coordinates ({screen_x}, {screen_y}) out of bounds")
+        return False
     
     pyautogui.moveTo(screen_x, screen_y, duration=0.1)
     time.sleep(0.1)
