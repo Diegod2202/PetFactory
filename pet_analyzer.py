@@ -41,31 +41,34 @@ UPGRADE_CLICKS = 30
 UPGRADE_CLICK_DELAY = 0.2
 PETEXP_FILE_PATH = r"C:\Godswar Origin\Localization\en_us\Settings\User"
 
-# Global stop flag
-should_stop = False
+# Global pause flag
+is_paused = False
 
 
 def setup_stop_hotkey():
-    """Setup D+F hotkey to stop the process"""
-    global should_stop
-    keyboard.add_hotkey('d+f', lambda: stop_process())
+    """Setup D+F hotkey to pause/resume the process"""
+    keyboard.add_hotkey('d+f', lambda: toggle_pause())
 
 
-def stop_process():
-    """Set the stop flag to True"""
-    global should_stop
-    should_stop = True
+def toggle_pause():
+    """Toggle the pause state"""
+    global is_paused
+    is_paused = not is_paused
+    print(f"Process {'PAUSED' if is_paused else 'RESUMED'}")
 
 
 def check_stop():
-    """Check if stop was requested"""
-    return should_stop
+    """Check if paused and wait until resumed"""
+    global is_paused
+    while is_paused:
+        time.sleep(0.1)
+    return False
 
 
 def reset_stop_flag():
-    """Reset the stop flag"""
-    global should_stop
-    should_stop = False
+    """Reset the pause flag"""
+    global is_paused
+    is_paused = False
 
 
 def minimize_origin_windows(all_pids):
@@ -310,7 +313,8 @@ def delete_petalert_file(file_path):
         pass
 
 
-def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_level=None):
+def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_level=None, 
+                game_folder_path=None, gui_callback=None):
     """
     Analyze pets for selected accounts
     
@@ -319,22 +323,31 @@ def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_
         accounts_info (dict): Dictionary with account information {pid: {'name': str, ...}}
         objective_exp (int): Optional target EXP for upgrading pets
         objective_level (int): Optional target level for upgrading pets
+        game_folder_path (str): Path to the game User settings folder
+        gui_callback: Optional GUI object to update status
     
     Returns:
         dict: Analysis results with pet information for each account
     """
-    global should_stop
+    global is_paused
     reset_stop_flag()
     setup_stop_hotkey()
     
+    # Use provided path or default
+    petexp_path = game_folder_path if game_folder_path else PETEXP_FILE_PATH
+    
     # Clean up any existing pet files before starting
     clean_pet_files()
+    if gui_callback:
+        gui_callback.log("🧹 Cleaned up existing pet files")
     
     results = {}
     
     # Get all Origin.exe PIDs and minimize them
     all_pids = list(accounts_info.keys())
     minimize_origin_windows(all_pids)
+    if gui_callback:
+        gui_callback.log(f"📦 Minimized {len(all_pids)} Origin windows")
     
     for pid in tracked_accounts:
         if check_stop():
@@ -346,7 +359,23 @@ def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_
             }
             break
         
+        # Check if disconnected
+        if gui_callback and hasattr(gui_callback, 'disconnect_monitor'):
+            if gui_callback.disconnect_monitor.is_disconnected(pid):
+                account_name = accounts_info.get(pid, {}).get('name', 'Unknown')
+                results[pid] = {
+                    'name': account_name,
+                    'pets': [],
+                    'status': 'Disconnected',
+                    'error': True
+                }
+                if gui_callback:
+                    gui_callback.log(f"⏭️ Skipping {account_name} (disconnected)")
+                continue
+        
         account_name = accounts_info.get(pid, {}).get('name', 'Unknown')
+        if gui_callback:
+            gui_callback.log(f"🔍 Analyzing {account_name}...")
         
         # Get window handle for this PID
         hwnd = get_window_by_pid(pid)
@@ -381,7 +410,12 @@ def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_
             break
         
         # Process all 8 pets
+        if gui_callback:
+            gui_callback.log(f"  📝 Processing 8 pets for {account_name}...")
+        
         for pet_index in range(8):
+            if gui_callback:
+                gui_callback.update_account_status(pid, pets_done=pet_index)
             if not process_single_pet(window, pet_index):
                 results[pid] = {
                     'name': account_name,
@@ -396,8 +430,11 @@ def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_
         time.sleep(2)
         
         # Read the petexp file (with .txt extension)
-        petexp_file = os.path.join(PETEXP_FILE_PATH, f"{account_name}_petexp.txt")
+        petexp_file = os.path.join(petexp_path, f"{account_name}_petexp.txt")
         pets_data = parse_petexp_file(petexp_file)
+        
+        if gui_callback:
+            gui_callback.log(f"  ✓ Found {len(pets_data)} pets in file")
         
         # If objectives provided, upgrade pets that need it
         if objective_exp and objective_level and pets_data:
@@ -417,19 +454,27 @@ def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_
             
             # Upgrade pets that need it (pet tab is still open from analysis)
             if pets_to_upgrade:
+                if gui_callback:
+                    gui_callback.log(f"  ⬆️ Upgrading {len(pets_to_upgrade)} pet(s) with sufficient EXP...")
                 for pet_index in pets_to_upgrade:
+                    pet_name = pets_data[pet_index]['name']
+                    if gui_callback:
+                        gui_callback.log(f"    • Upgrading {pet_name} (Pet {pet_index + 1})...")
                     if not upgrade_pet_levels(window, pet_index):
                         break
             
             # Set best pet to carry if found
             if best_pet_index is not None:
+                best_pet_name = pets_data[best_pet_index]['name']
+                if gui_callback:
+                    gui_callback.log(f"  🎯 Setting {best_pet_name} (Pet {best_pet_index + 1}) to carry")
                 pet_x, pet_y = PET_COORDINATES[best_pet_index]
                 click_at_window_position(window, pet_x, pet_y)
                 click_at_window_position(window, *CARRY_COORD)
         
         # Delete the petexp and petalert files
         delete_petexp_file(petexp_file)
-        petalert_file = os.path.join(PETEXP_FILE_PATH, f"{account_name}_petalert.txt")
+        petalert_file = os.path.join(petexp_path, f"{account_name}_petalert.txt")
         delete_petalert_file(petalert_file)
         
         # Close the pet window by clicking on Pet tab again

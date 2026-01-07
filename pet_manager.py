@@ -30,6 +30,7 @@ PET_COORDINATES = [
 # UI coordinates
 PET_TAB_COORD = (885, 715)
 CARRY_COORD = (183, 485)
+DETAILS_COORD = (276, 488)
 ALERT_DETAILS_COORD = (70, 134)
 UPGRADE_COORD = (282, 555)
 CLOSE_PET_COORD = (408, 109)
@@ -41,33 +42,35 @@ UPGRADE_CLICK_DELAY = 0.2
 ALERT_CHECK_INTERVAL = 10  # seconds
 PETEXP_FILE_PATH = r"C:\Godswar Origin\Localization\en_us\Settings\User"
 
-# Global stop flag
-should_stop = False
+# Global pause flag
+is_paused = False
 management_active = False
 
 
 def setup_stop_hotkey():
-    """Setup D+F hotkey to stop the process"""
-    global should_stop
-    keyboard.add_hotkey('d+f', lambda: stop_process())
+    """Setup D+F hotkey to pause/resume the process"""
+    keyboard.add_hotkey('d+f', lambda: toggle_pause())
 
 
-def stop_process():
-    """Set the stop flag to True"""
-    global should_stop, management_active
-    should_stop = True
-    management_active = False
+def toggle_pause():
+    """Toggle the pause state"""
+    global is_paused
+    is_paused = not is_paused
+    print(f"Process {'PAUSED' if is_paused else 'RESUMED'}")
 
 
 def check_stop():
-    """Check if stop was requested"""
-    return should_stop
+    """Check if paused and wait until resumed"""
+    global is_paused
+    while is_paused:
+        time.sleep(0.1)
+    return False
 
 
 def reset_stop_flag():
-    """Reset the stop flag"""
-    global should_stop
-    should_stop = False
+    """Reset the pause flag"""
+    global is_paused
+    is_paused = False
 
 
 def get_window_by_pid(pid):
@@ -170,9 +173,10 @@ def parse_petalert_file(file_path):
         return None
 
 
-def delete_alert_file(account_name):
+def delete_alert_file(account_name, alert_path=None):
     """Delete the petalert file for a specific account"""
-    file_path = os.path.join(PETEXP_FILE_PATH, f"{account_name}_petalert.txt")
+    path = alert_path if alert_path else PETEXP_FILE_PATH
+    file_path = os.path.join(path, f"{account_name}_petalert.txt")
     try:
         if os.path.exists(file_path):
             os.remove(file_path)
@@ -204,6 +208,10 @@ def set_carry_for_pet(window, pet_index):
     if not click_at_window_position(window, *CARRY_COORD):
         return False
     
+    # Open Details so the game can detect when pet is ready
+    if not click_at_window_position(window, *DETAILS_COORD):
+        return False
+    
     # Close pet tab
     if not click_at_window_position(window, *PET_TAB_COORD):
         return False
@@ -211,7 +219,7 @@ def set_carry_for_pet(window, pet_index):
     return True
 
 
-def process_pet_alert(window, account_name):
+def process_pet_alert(window, account_name, alert_path=None):
     """
     Process a pet alert: open details, upgrade 30 times, close
     
@@ -232,7 +240,7 @@ def process_pet_alert(window, account_name):
         return False
     
     # Delete the alert file
-    delete_alert_file(account_name)
+    delete_alert_file(account_name, alert_path)
     
     return True
 
@@ -277,7 +285,7 @@ def find_next_pet_to_carry(account_state, analysis_data, objective_level, object
         return None
 
 
-def monitor_alerts(accounts_state, accounts_info, objective_level, objective_exp):
+def monitor_alerts(accounts_state, accounts_info, objective_level, objective_exp, gui_callback=None):
     """
     Monitor for alert files and process them
     Runs in a separate thread
@@ -292,8 +300,15 @@ def monitor_alerts(accounts_state, accounts_info, objective_level, objective_exp
             if state['all_pets_completed']:
                 continue
             
+            # Check if disconnected
+            if gui_callback and hasattr(gui_callback, 'disconnect_monitor'):
+                if gui_callback.disconnect_monitor.is_disconnected(pid):
+                    state['all_pets_completed'] = True
+                    continue
+            
             account_name = accounts_info.get(pid, {}).get('name', '')
-            alert_file = os.path.join(PETEXP_FILE_PATH, f"{account_name}_petalert.txt")
+            alert_path = state.get('alert_path', PETEXP_FILE_PATH)
+            alert_file = os.path.join(alert_path, f"{account_name}_petalert.txt")
             
             # Check if alert file exists
             if os.path.exists(alert_file):
@@ -312,7 +327,7 @@ def monitor_alerts(accounts_state, accounts_info, objective_level, objective_exp
                     continue
                 
                 # Process the alert
-                if process_pet_alert(window, account_name):
+                if process_pet_alert(window, account_name, alert_path):
                     # Mark current pet as completed
                     current_pet = state['current_pet_index']
                     if current_pet is not None:
@@ -336,7 +351,8 @@ def monitor_alerts(accounts_state, accounts_info, objective_level, objective_exp
         time.sleep(ALERT_CHECK_INTERVAL)
 
 
-def start_pet_management(tracked_accounts, accounts_info, objective_exp, objective_level, analysis_results=None):
+def start_pet_management(tracked_accounts, accounts_info, objective_exp, objective_level, 
+                        analysis_results=None, game_folder_path=None, gui_callback=None):
     """
     Start the pet management process for selected accounts
     
@@ -346,14 +362,19 @@ def start_pet_management(tracked_accounts, accounts_info, objective_exp, objecti
         objective_exp (int): Target experience points to achieve
         objective_level (int): Target level for pets
         analysis_results (dict): Optional analysis results from analyze_pets()
+        game_folder_path (str): Path to the game User settings folder
+        gui_callback: Optional GUI object to check disconnect status
     
     Returns:
         dict: Management results for each account
     """
-    global should_stop, management_active
+    global is_paused, management_active
     reset_stop_flag()
     setup_stop_hotkey()
     management_active = True
+    
+    # Use provided path or default
+    petalert_path = game_folder_path if game_folder_path else PETEXP_FILE_PATH
     
     # Clean up any existing pet files before starting
     clean_pet_files()
@@ -379,13 +400,20 @@ def start_pet_management(tracked_accounts, accounts_info, objective_exp, objecti
             'analysis_data': analysis_data,
             'completed_pets': completed_pets,
             'current_pet_index': None,
-            'all_pets_completed': False
+            'all_pets_completed': False,
+            'alert_path': petalert_path
         }
     
     # Set initial carry for each account
     for pid, state in accounts_state.items():
         if check_stop():
             break
+        
+        # Check if disconnected
+        if gui_callback and hasattr(gui_callback, 'disconnect_monitor'):
+            if gui_callback.disconnect_monitor.is_disconnected(pid):
+                state['all_pets_completed'] = True
+                continue
         
         hwnd = get_window_by_pid(pid)
         if not hwnd:
@@ -409,7 +437,7 @@ def start_pet_management(tracked_accounts, accounts_info, objective_exp, objecti
     # Start monitoring thread
     monitor_thread = threading.Thread(
         target=monitor_alerts,
-        args=(accounts_state, accounts_info, objective_level, objective_exp),
+        args=(accounts_state, accounts_info, objective_level, objective_exp, gui_callback),
         daemon=True
     )
     monitor_thread.start()
