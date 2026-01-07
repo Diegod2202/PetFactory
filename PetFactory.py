@@ -397,6 +397,8 @@ class PetFactoryGUI:
         
         # Get all Origin.exe processes
         pids = get_all_process_ids("Origin.exe")
+        if (not pids):
+            pids = get_all_process_ids("Godswar.exe")
         new_pids = set(pids)
         
         # Remove PIDs that no longer exist from disconnect monitor
