@@ -298,12 +298,15 @@ def find_next_pet_to_carry(account_state, analysis_data, objective_level):
         return None
 
 
-def monitor_alerts(accounts_state, accounts_info, objective_level, gui_callback=None):
+def monitor_alerts(accounts_state, accounts_info, objective_level, gui_callback=None, ignored_pets=None):
     """
     Monitor for alert files and process them
     Runs in a separate thread
     """
     global management_active
+    
+    if ignored_pets is None:
+        ignored_pets = {}
     
     def update_gui_status(pid, status=None, pets_done=None):
         """Thread-safe GUI update"""
@@ -394,7 +397,8 @@ def monitor_alerts(accounts_state, accounts_info, objective_level, gui_callback=
 
 
 def start_pet_management(tracked_accounts, accounts_info, objective_level, 
-                        analysis_results=None, game_folder_path=None, gui_callback=None):
+                        analysis_results=None, game_folder_path=None, gui_callback=None,
+                        ignored_pets=None):
     """
     Start the pet management process for selected accounts
     
@@ -405,6 +409,7 @@ def start_pet_management(tracked_accounts, accounts_info, objective_level,
         analysis_results (dict): Optional analysis results from analyze_pets()
         game_folder_path (str): Path to the game User settings folder
         gui_callback: Optional GUI object to check disconnect status
+        ignored_pets (dict): Dict of {character_name: [list of ignored pet indices]}
     
     Returns:
         dict: Management results for each account
@@ -412,6 +417,9 @@ def start_pet_management(tracked_accounts, accounts_info, objective_level,
     global is_paused, management_active
     reset_stop_flag()
     management_active = True
+    
+    if ignored_pets is None:
+        ignored_pets = {}
     
     # Calculate objective EXP from level
     objective_exp = get_exp_for_level(objective_level)
@@ -429,12 +437,23 @@ def start_pet_management(tracked_accounts, accounts_info, objective_level,
         analysis_data = None
         completed_pets = [False] * 8
         
+        # Get ignored pets for this account
+        account_ignored = ignored_pets.get(account_name, [])
+        
+        # Mark ignored pets as completed so they're never selected
+        for i in account_ignored:
+            if 0 <= i < 8:
+                completed_pets[i] = True
+        
         if analysis_results and pid in analysis_results:
             result = analysis_results[pid]
-            if not result.get('error') and result.get('pets'):
-                analysis_data = result['pets']
+            if not result.get('error') and result.get('all_pets'):
+                # Use all_pets (unfiltered) for index-based operations
+                analysis_data = result.get('all_pets', result.get('pets', []))
                 # Mark pets at or above objective level/exp as completed
                 for i, pet in enumerate(analysis_data):
+                    if i in account_ignored:
+                        continue  # Already marked
                     if pet['level'] >= objective_level or pet['current_exp'] >= objective_exp:
                         completed_pets[i] = True
         
@@ -442,6 +461,7 @@ def start_pet_management(tracked_accounts, accounts_info, objective_level,
             'name': account_name,
             'analysis_data': analysis_data,
             'completed_pets': completed_pets,
+            'ignored_pets': account_ignored,
             'current_pet_index': None,
             'all_pets_completed': False,
             'alert_path': petalert_path
@@ -503,7 +523,7 @@ def start_pet_management(tracked_accounts, accounts_info, objective_level,
     # Start monitoring thread
     monitor_thread = threading.Thread(
         target=monitor_alerts,
-        args=(accounts_state, accounts_info, objective_level, gui_callback),
+        args=(accounts_state, accounts_info, objective_level, gui_callback, ignored_pets),
         daemon=True
     )
     monitor_thread.start()

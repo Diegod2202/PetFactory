@@ -319,7 +319,7 @@ def delete_petalert_file(file_path):
 
 
 def analyze_pets(tracked_accounts, accounts_info, objective_level=None, 
-                game_folder_path=None, gui_callback=None):
+                game_folder_path=None, gui_callback=None, ignored_pets=None):
     """
     Analyze pets for selected accounts
     
@@ -329,12 +329,16 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
         objective_level (int): Optional target level for upgrading pets
         game_folder_path (str): Path to the game User settings folder
         gui_callback: Optional GUI object to update status
+        ignored_pets (dict): Dict of {character_name: [list of ignored pet indices]}
     
     Returns:
         dict: Analysis results with pet information for each account
     """
     global is_paused
     reset_stop_flag()
+    
+    if ignored_pets is None:
+        ignored_pets = {}
     
     # Calculate objective EXP from level if provided
     objective_exp = get_exp_for_level(objective_level) if objective_level else None
@@ -380,12 +384,17 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
                 continue
         
         account_name = accounts_info.get(pid, {}).get('name', 'Unknown')
+        
+        # Update status to Analyzing
         if gui_callback:
+            gui_callback.update_account_status(pid, status="Analyzing", pets_done=0)
             gui_callback.log(f"🔍 Analyzing {account_name}...")
         
         # Get window handle for this PID
         hwnd = get_window_by_pid(pid)
         if not hwnd:
+            if gui_callback:
+                gui_callback.update_account_status(pid, status="Window Error")
             results[pid] = {
                 'name': account_name,
                 'pets': [],
@@ -395,8 +404,12 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
             continue
         
         # Bring window to front and get window object
+        if gui_callback:
+            gui_callback.update_account_status(pid, status="Opening window")
         window = bring_window_to_front(hwnd)
         if not window:
+            if gui_callback:
+                gui_callback.update_account_status(pid, status="Window Error")
             results[pid] = {
                 'name': account_name,
                 'pets': [],
@@ -406,6 +419,8 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
             continue
         
         # Click on Pet tab
+        if gui_callback:
+            gui_callback.update_account_status(pid, status="Opening Pet tab")
         if not click_at_window_position(window, *PET_TAB_COORD):
             results[pid] = {
                 'name': account_name,
@@ -415,13 +430,28 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
             }
             break
         
-        # Process all 8 pets
-        if gui_callback:
-            gui_callback.log(f"  📝 Processing 8 pets for {account_name}...")
+        # Get ignored pet indices for this account
+        account_ignored = ignored_pets.get(account_name, [])
         
+        # Process all 8 pets (skipping ignored ones)
+        if gui_callback:
+            if account_ignored:
+                gui_callback.log(f"  📝 Processing pets for {account_name} (ignoring pets: {[i+1 for i in account_ignored]})...")
+            else:
+                gui_callback.log(f"  📝 Processing 8 pets for {account_name}...")
+        
+        # Create mapping: file_index -> game_pet_index
+        processed_pet_indices = []
         for pet_index in range(8):
+            # Skip ignored pets
+            if pet_index in account_ignored:
+                if gui_callback:
+                    gui_callback.log(f"    ⏭️ Skipping Pet {pet_index + 1} (ignored)")
+                continue
+            
             if gui_callback:
-                gui_callback.update_account_status(pid, status=f"Scanning Pet {pet_index + 1}", pets_done=pet_index)
+                gui_callback.update_account_status(pid, status=f"Scanning Pet {pet_index + 1}", pets_done=len(processed_pet_indices))
+            
             if not process_single_pet(window, pet_index):
                 results[pid] = {
                     'name': account_name,
@@ -431,6 +461,8 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
                 }
                 minimize_window(hwnd)
                 return results
+            
+            processed_pet_indices.append(pet_index)
         
         # Update status - Reading file
         if gui_callback:
@@ -441,41 +473,65 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
         
         # Read the petexp file (with .txt extension)
         petexp_file = os.path.join(petexp_path, f"{account_name}_petexp.txt")
-        pets_data = parse_petexp_file(petexp_file)
+        pets_data_raw = parse_petexp_file(petexp_file)
+        
+        # Map file indices to game pet indices
+        # The file only contains pets that were processed (non-ignored)
+        # So we need to map: file_index -> actual_game_pet_index
+        pets_data = [None] * 8  # Create array with correct positions
+        
+        for file_idx, game_idx in enumerate(processed_pet_indices):
+            if file_idx < len(pets_data_raw):
+                pets_data[game_idx] = pets_data_raw[file_idx]
+        
+        # Count valid pets (non-None)
+        valid_pets = [p for p in pets_data if p is not None]
         
         if gui_callback:
-            gui_callback.log(f"  ✓ Found {len(pets_data)} pets in file")
+            total_found = len(valid_pets)
+            ignored_count = len(account_ignored)
+            gui_callback.log(f"  ✓ Found {total_found} pets in file ({total_found} processed, {ignored_count} ignored)")
+        
+        # Filter out ignored pets from data (remove None entries)
+        filtered_pets_data = valid_pets
         
         # If objectives provided, upgrade pets that need it
-        if objective_exp and objective_level and pets_data:
+        if objective_exp and objective_level and valid_pets:
             pets_to_upgrade = []
             best_pet_index = None
             best_pet_exp = -1
             
-            for i, pet in enumerate(pets_data):
+            # Iterate through actual game indices
+            for game_idx in range(8):
+                pet = pets_data[game_idx]
+                
+                # Skip if None (ignored or not processed)
+                if pet is None:
+                    continue
+                
                 # Check if pet has EXP but not level
                 if pet['current_exp'] >= objective_exp and pet['level'] < objective_level:
-                    pets_to_upgrade.append(i)
+                    pets_to_upgrade.append(game_idx)
                 # Track best pet for carry
                 elif pet['current_exp'] < objective_exp and pet['level'] < objective_level:
                     if pet['current_exp'] > best_pet_exp:
                         best_pet_exp = pet['current_exp']
-                        best_pet_index = i
+                        best_pet_index = game_idx
             
             # Upgrade pets that need it (pet tab is still open from analysis)
             if pets_to_upgrade:
                 if gui_callback:
                     gui_callback.update_account_status(pid, status=f"Upgrading {len(pets_to_upgrade)} pets")
                     gui_callback.log(f"  ⬆️ Upgrading {len(pets_to_upgrade)} pet(s) with sufficient EXP...")
-                for pet_index in pets_to_upgrade:
-                    pet = pets_data[pet_index]
+                for game_idx in pets_to_upgrade:
+                    pet = pets_data[game_idx]
                     pet_name = pet['name']
                     current_level = pet['level']
                     upgrade_count = objective_level - current_level
                     if gui_callback:
-                        gui_callback.update_account_status(pid, status=f"Upgrading Pet {pet_index + 1}")
-                        gui_callback.log(f"    • Upgrading {pet_name} (Pet {pet_index + 1}) from Lv{current_level} to Lv{objective_level} (+{upgrade_count})")
-                    if not upgrade_pet_levels(window, pet_index, current_level, objective_level):
+                        gui_callback.update_account_status(pid, status=f"Upgrading Pet {game_idx + 1}")
+                        gui_callback.log(f"    • Upgrading {pet_name} (Pet {game_idx + 1}) from Lv{current_level} to Lv{objective_level} (+{upgrade_count})")
+                    if not upgrade_pet_levels(window, game_idx, current_level, objective_level):
                         break
             
             # Set best pet to carry if found
@@ -499,11 +555,23 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
         # Minimize the window
         minimize_window(hwnd)
         
-        # Store results
+        # Store results (with filtered pets, excluding ignored ones)
+        ignored_count = len(account_ignored)
+        total_pets = len(pets_data)
+        valid_pets = len(filtered_pets_data)
+        
+        status_msg = 'Success'
+        if total_pets < 8:
+            status_msg = f'Only {total_pets} pets found'
+        elif ignored_count > 0:
+            status_msg = f'Success ({valid_pets} valid, {ignored_count} ignored)'
+        
         results[pid] = {
             'name': account_name,
-            'pets': pets_data,
-            'status': 'Success' if len(pets_data) == 8 else f'Only {len(pets_data)} pets found',
+            'pets': filtered_pets_data,
+            'all_pets': pets_data,  # Keep original for reference
+            'ignored_indices': account_ignored,
+            'status': status_msg,
             'error': False
         }
     

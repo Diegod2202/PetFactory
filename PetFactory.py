@@ -3,10 +3,11 @@ Pet Factory - Main GUI Application
 Manages the user interface and coordinates pet management operations
 """
 import tkinter as tk
-from tkinter import messagebox, scrolledtext
+from tkinter import messagebox, scrolledtext, Toplevel
 from datetime import datetime
 import os
 import sys
+import json
 import keyboard
 
 # Import custom modules
@@ -39,6 +40,10 @@ class PetFactoryGUI:
         # Variables
         self.accounts = {}  # {pid: {'name': str, 'track': BooleanVar}}
         self.analysis_results = {}  # Store analysis results for Start to use
+        self.ignored_pets = {}  # {character_name: [list of ignored pet indices 0-7]}
+        
+        # Load ignored pets from file
+        self._load_ignored_pets()
         
         # Initialize disconnect monitor
         self.disconnect_monitor = DisconnectMonitor(gui_callback=self)
@@ -289,6 +294,127 @@ class PetFactoryGUI:
         except ValueError:
             self.exp_info_label.config(text="")
     
+    def _get_ignored_pets_file(self):
+        """Get path to ignored pets JSON file"""
+        return os.path.join(os.path.dirname(__file__), "ignored_pets.json")
+    
+    def _load_ignored_pets(self):
+        """Load ignored pets from JSON file"""
+        try:
+            file_path = self._get_ignored_pets_file()
+            if os.path.exists(file_path):
+                with open(file_path, 'r') as f:
+                    self.ignored_pets = json.load(f)
+        except Exception:
+            self.ignored_pets = {}
+    
+    def _save_ignored_pets(self):
+        """Save ignored pets to JSON file"""
+        try:
+            file_path = self._get_ignored_pets_file()
+            with open(file_path, 'w') as f:
+                json.dump(self.ignored_pets, f, indent=2)
+        except Exception:
+            pass
+    
+    def _show_ignore_pets_dialog(self, pid):
+        """Show dialog to select which pets to ignore for an account"""
+        account = self.accounts.get(pid)
+        if not account:
+            return
+        
+        player_name = account['name']
+        current_ignored = self.ignored_pets.get(player_name, [])
+        
+        # Create popup window
+        dialog = Toplevel(self.root)
+        dialog.title(f"Ignore Pets - {player_name}")
+        dialog.geometry("300x320")
+        dialog.configure(bg=self.bg_dark)
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center on parent
+        dialog.geometry(f"+{self.root.winfo_x() + 400}+{self.root.winfo_y() + 200}")
+        
+        # Title
+        tk.Label(dialog, text=f"Select pets to ignore for:", 
+                font=("Segoe UI", 11, "bold"),
+                bg=self.bg_dark, fg=self.text_color).pack(pady=(15, 0))
+        tk.Label(dialog, text=player_name, 
+                font=("Segoe UI", 12, "bold"),
+                bg=self.bg_dark, fg=self.accent_blue).pack(pady=(0, 15))
+        
+        # Checkboxes frame
+        check_frame = tk.Frame(dialog, bg=self.bg_medium, padx=20, pady=15)
+        check_frame.pack(padx=20, pady=5, fill=tk.X)
+        
+        # Create 8 checkboxes in 2 columns
+        pet_vars = []
+        for i in range(8):
+            var = tk.BooleanVar(value=(i in current_ignored))
+            pet_vars.append(var)
+            
+            row = i % 4
+            col = i // 4
+            
+            cb = tk.Checkbutton(check_frame, text=f"Pet {i + 1}", variable=var,
+                               font=("Segoe UI", 10),
+                               bg=self.bg_medium, fg=self.text_color,
+                               activebackground=self.bg_medium,
+                               activeforeground=self.text_color,
+                               selectcolor=self.bg_dark,
+                               cursor="hand2")
+            cb.grid(row=row, column=col, sticky="w", padx=20, pady=3)
+        
+        # Buttons frame
+        btn_frame = tk.Frame(dialog, bg=self.bg_dark)
+        btn_frame.pack(pady=20)
+        
+        def save_and_close():
+            # Collect ignored indices
+            ignored = [i for i, var in enumerate(pet_vars) if var.get()]
+            if ignored:
+                self.ignored_pets[player_name] = ignored
+            elif player_name in self.ignored_pets:
+                del self.ignored_pets[player_name]
+            self._save_ignored_pets()
+            
+            # Update button indicator
+            self._update_ignore_button(pid)
+            
+            ignored_count = len(ignored)
+            self.log(f"✓ {player_name}: Ignoring {ignored_count} pet(s)" if ignored_count else f"✓ {player_name}: No pets ignored")
+            dialog.destroy()
+        
+        save_btn = tk.Button(btn_frame, text="Save", command=save_and_close,
+                            bg=self.accent_green, fg="#000000",
+                            font=("Segoe UI", 10, "bold"),
+                            width=8, cursor="hand2")
+        save_btn.pack(side=tk.LEFT, padx=5)
+        
+        cancel_btn = tk.Button(btn_frame, text="Cancel", command=dialog.destroy,
+                              bg=self.bg_light, fg=self.text_color,
+                              font=("Segoe UI", 10),
+                              width=8, cursor="hand2")
+        cancel_btn.pack(side=tk.LEFT, padx=5)
+    
+    def _update_ignore_button(self, pid):
+        """Update ignore button to show if pets are ignored"""
+        account = self.accounts.get(pid)
+        if not account or 'ignore_btn' not in account:
+            return
+        
+        player_name = account['name']
+        ignored_count = len(self.ignored_pets.get(player_name, []))
+        
+        btn = account['ignore_btn']
+        if ignored_count > 0:
+            btn.config(text=f"⚙ {ignored_count}", fg=self.accent_orange)
+        else:
+            btn.config(text="⚙", fg=self.text_secondary)
+    
     def log(self, message):
         """Add a message to the log console"""
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -411,20 +537,20 @@ class PetFactoryGUI:
         for pid in pids:
             self.disconnect_monitor.add_pid(pid)
         
-        # Configure grid columns for consistent width
-        col_widths = [150, 80, 80, 60]  # Character Name, Pets Done, Status, Track
-        
-        # Create header row
+        # Create header row with proper grid expansion
         header_frame = tk.Frame(self.accounts_frame, bg=self.bg_medium)
         header_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        headers = ["Character Name", "Pets Done", "Status", "Track"]
-        for col, (header, width) in enumerate(zip(headers, col_widths)):
+        # Configure column weights for proper expansion (Character Name expands, others fixed)
+        headers = ["Character Name", "Pets Done", "Status", "Ignore", "Track"]
+        col_weights = [3, 1, 1, 1, 1]  # Character Name takes 3x space
+        
+        for col, (header, weight) in enumerate(zip(headers, col_weights)):
             anchor = tk.W if col == 0 else tk.CENTER
             lbl = tk.Label(header_frame, text=header, font=("Segoe UI", 11, "bold"),
                           bg=self.bg_medium, fg=self.text_secondary, anchor=anchor)
             lbl.grid(row=0, column=col, sticky="ew", padx=5, pady=10)
-            header_frame.columnconfigure(col, minsize=width)
+            header_frame.columnconfigure(col, weight=weight)
         
         # Add each account
         for i, pid in enumerate(pids):
@@ -437,9 +563,9 @@ class PetFactoryGUI:
             account_frame = tk.Frame(self.accounts_frame, bg=row_bg)
             account_frame.pack(fill=tk.X, padx=5)
             
-            # Configure columns with same widths as header
-            for col, width in enumerate(col_widths):
-                account_frame.columnconfigure(col, minsize=width)
+            # Configure columns with same weights as header
+            for col, weight in enumerate(col_weights):
+                account_frame.columnconfigure(col, weight=weight)
             
             # Character name (column 0)
             tk.Label(account_frame, text=player_name, font=("Segoe UI", 11),
@@ -456,7 +582,22 @@ class PetFactoryGUI:
                                    bg=row_bg, fg=self.text_secondary, anchor=tk.CENTER)
             status_label.grid(row=0, column=2, sticky="ew", padx=5, pady=12)
             
-            # Track checkbox (column 3)
+            # Ignore button (column 3)
+            ignored_count = len(self.ignored_pets.get(player_name, []))
+            ignore_text = f"⚙ {ignored_count}" if ignored_count > 0 else "⚙"
+            ignore_color = self.accent_orange if ignored_count > 0 else self.text_secondary
+            
+            ignore_btn = tk.Button(account_frame, text=ignore_text,
+                                  font=("Segoe UI", 9),
+                                  bg=row_bg, fg=ignore_color,
+                                  activebackground=row_bg,
+                                  activeforeground=self.accent_orange,
+                                  relief=tk.FLAT, borderwidth=0,
+                                  cursor="hand2",
+                                  command=lambda p=pid: self._show_ignore_pets_dialog(p))
+            ignore_btn.grid(row=0, column=3, pady=12)
+            
+            # Track checkbox (column 4)
             track_var = tk.BooleanVar(value=False)
             track_check = tk.Checkbutton(account_frame, variable=track_var,
                                         bg=row_bg, activebackground=row_bg,
@@ -464,7 +605,7 @@ class PetFactoryGUI:
                                         fg=self.accent_green,
                                         activeforeground=self.accent_green,
                                         cursor="hand2")
-            track_check.grid(row=0, column=3, pady=12)
+            track_check.grid(row=0, column=4, pady=12)
             
             # Store account info
             self.accounts[pid] = {
@@ -472,18 +613,28 @@ class PetFactoryGUI:
                 'track': track_var,
                 'pets_done_label': pets_done_label,
                 'status_label': status_label,
+                'ignore_btn': ignore_btn,
                 'pets_done': 0,
                 'status': 'Idle'
             }
     
     def on_start(self):
         """Handle Start button click"""
+        # Check if already running
+        if hasattr(self, 'is_running') and self.is_running:
+            messagebox.showinfo("Info", "Management is already running!")
+            return
+        
         # Get tracked accounts
         tracked = [pid for pid, info in self.accounts.items() if info['track'].get()]
         
         if not tracked:
             messagebox.showwarning("Warning", "No accounts selected for tracking!")
             return
+        
+        # Set running state
+        self.is_running = True
+        self.start_btn.config(text="⏳ Running...", bg=self.accent_orange, state=tk.DISABLED)
         
         self.log(f"Starting management for {len(tracked)} account(s)")
         
@@ -533,7 +684,8 @@ class PetFactoryGUI:
                 
                 # Run analysis with game folder and GUI callback
                 analysis_results = analyze_pets(tracked, self.accounts, objective_level,
-                                              game_folder_path=game_folder, gui_callback=self)
+                                              game_folder_path=game_folder, gui_callback=self,
+                                              ignored_pets=self.ignored_pets)
                 self.analysis_results = analysis_results
                 
                 # Update final status for all accounts
@@ -580,13 +732,17 @@ class PetFactoryGUI:
         """Run management process in background thread"""
         results = start_pet_management(tracked, self.accounts, objective_level, 
                                       analysis_results, game_folder_path=game_folder, 
-                                      gui_callback=self)
+                                      gui_callback=self, ignored_pets=self.ignored_pets)
         
         # Show results in main thread
         self.root.after(0, lambda: self._show_management_results(results))
     
     def _show_management_results(self, results):
         """Show management results in logs"""
+        # Restore Start button
+        self.is_running = False
+        self.start_btn.config(text="▶ Start", bg=self.accent_green, state=tk.NORMAL)
+        
         self.log("=" * 40)
         self.log("Pet Management Complete")
         self.log("=" * 40)
