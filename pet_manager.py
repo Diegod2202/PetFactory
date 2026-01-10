@@ -13,6 +13,7 @@ import re
 import keyboard
 import threading
 from file_cleaner import clean_pet_files
+from pet_data import get_exp_for_level
 
 # Disable PyAutoGUI fail-safe
 pyautogui.FAILSAFE = False
@@ -39,8 +40,7 @@ UPGRADE_COORD = (282, 555)
 CLOSE_PET_COORD = (408, 109)
 
 # Settings
-CLICK_DELAY = 0.7
-UPGRADE_CLICKS = 30
+CLICK_DELAY = 0.45
 UPGRADE_CLICK_DELAY = 0.2
 ALERT_CHECK_INTERVAL = 10  # seconds
 PETEXP_FILE_PATH = r"C:\Godswar Origin\Localization\en_us\Settings\User"
@@ -48,18 +48,6 @@ PETEXP_FILE_PATH = r"C:\Godswar Origin\Localization\en_us\Settings\User"
 # Global pause flag
 is_paused = False
 management_active = False
-
-
-def setup_stop_hotkey():
-    """Setup D+F hotkey to pause/resume the process"""
-    keyboard.add_hotkey('d+f', lambda: toggle_pause())
-
-
-def toggle_pause():
-    """Toggle the pause state"""
-    global is_paused
-    is_paused = not is_paused
-    print(f"Process {'PAUSED' if is_paused else 'RESUMED'}")
 
 
 def check_stop():
@@ -178,7 +166,7 @@ def parse_petalert_file(file_path):
             'target_exp': int(alert_data.get('Target EXP', 0)),
             'timestamp': alert_data.get('Timestamp', '')
         }
-    except:
+    except Exception:
         return None
 
 
@@ -189,7 +177,7 @@ def delete_alert_file(account_name, alert_path=None):
     try:
         if os.path.exists(file_path):
             os.remove(file_path)
-    except:
+    except Exception:
         pass
 
 
@@ -228,19 +216,34 @@ def set_carry_for_pet(window, pet_index):
     return True
 
 
-def process_pet_alert(window, account_name, alert_path=None):
+def process_pet_alert(window, account_name, current_level, objective_level, alert_path=None):
     """
-    Process a pet alert: open details, upgrade 30 times, close
+    Process a pet alert: open details, upgrade to objective level, close
+    
+    Args:
+        window: pygetwindow Window object
+        account_name: Name of the account
+        current_level: Current level of the pet (from alert file)
+        objective_level: Target level to reach
+        alert_path: Path to alert files
     
     Returns:
         bool: Success status
     """
+    # Calculate how many upgrades needed
+    upgrade_clicks = max(0, objective_level - current_level)
+    
+    if upgrade_clicks == 0:
+        # Pet already at or above objective level
+        delete_alert_file(account_name, alert_path)
+        return True
+    
     # Right-click on alert details
     if not click_at_window_position(window, *ALERT_DETAILS_COORD, button='right'):
         return False
     
-    # Click upgrade button 30 times
-    for i in range(UPGRADE_CLICKS):
+    # Click upgrade button (dynamic amount based on level difference)
+    for i in range(upgrade_clicks):
         if not click_at_window_position(window, *UPGRADE_COORD, delay=UPGRADE_CLICK_DELAY):
             return False
     
@@ -254,7 +257,7 @@ def process_pet_alert(window, account_name, alert_path=None):
     return True
 
 
-def find_next_pet_to_carry(account_state, analysis_data, objective_level, objective_exp):
+def find_next_pet_to_carry(account_state, analysis_data, objective_level):
     """
     Find the next pet to set as carry
     
@@ -262,11 +265,12 @@ def find_next_pet_to_carry(account_state, analysis_data, objective_level, object
         account_state: Current state of the account
         analysis_data: Analysis data if available
         objective_level: Target level for pets
-        objective_exp: Target experience for pets
     
     Returns:
         int: Pet index (0-7) or None if all pets completed
     """
+    objective_exp = get_exp_for_level(objective_level)
+    
     if analysis_data:
         # Find pet closest to objective that isn't completed and below objective level/exp
         best_pet = None
@@ -294,12 +298,22 @@ def find_next_pet_to_carry(account_state, analysis_data, objective_level, object
         return None
 
 
-def monitor_alerts(accounts_state, accounts_info, objective_level, objective_exp, gui_callback=None):
+def monitor_alerts(accounts_state, accounts_info, objective_level, gui_callback=None):
     """
     Monitor for alert files and process them
     Runs in a separate thread
     """
     global management_active
+    
+    def update_gui_status(pid, status=None, pets_done=None):
+        """Thread-safe GUI update"""
+        if gui_callback and hasattr(gui_callback, 'root'):
+            gui_callback.root.after(0, lambda: gui_callback.update_account_status(pid, status=status, pets_done=pets_done))
+    
+    def log_message(msg):
+        """Thread-safe log"""
+        if gui_callback and hasattr(gui_callback, 'root'):
+            gui_callback.root.after(0, lambda: gui_callback.log(msg))
     
     while management_active and not check_stop():
         for pid, state in accounts_state.items():
@@ -313,6 +327,7 @@ def monitor_alerts(accounts_state, accounts_info, objective_level, objective_exp
             if gui_callback and hasattr(gui_callback, 'disconnect_monitor'):
                 if gui_callback.disconnect_monitor.is_disconnected(pid):
                     state['all_pets_completed'] = True
+                    update_gui_status(pid, status="Disconnected")
                     continue
             
             account_name = accounts_info.get(pid, {}).get('name', '')
@@ -335,23 +350,41 @@ def monitor_alerts(accounts_state, accounts_info, objective_level, objective_exp
                 if not window:
                     continue
                 
-                # Process the alert
-                if process_pet_alert(window, account_name, alert_path):
+                # Update status - Upgrading
+                current_pet = state['current_pet_index']
+                pet_num = current_pet + 1 if current_pet is not None else "?"
+                current_level = alert_data.get('pet_level', 1)
+                upgrade_count = max(0, objective_level - current_level)
+                update_gui_status(pid, status=f"Upgrading Pet {pet_num} (+{upgrade_count} lvls)")
+                log_message(f"⬆️ {account_name}: Upgrading Pet {pet_num} from Lv{current_level} to Lv{objective_level}")
+                
+                # Process the alert with current level for dynamic upgrades
+                if process_pet_alert(window, account_name, current_level, objective_level, alert_path):
                     # Mark current pet as completed
-                    current_pet = state['current_pet_index']
                     if current_pet is not None:
                         state['completed_pets'][current_pet] = True
                     
+                    # Update pets done count
+                    completed_count = sum(state['completed_pets'])
+                    update_gui_status(pid, pets_done=completed_count)
+                    log_message(f"✅ {account_name}: Pet {pet_num} reached Lv{objective_level} ({completed_count}/8)")
+                    
                     # Find next pet
-                    next_pet = find_next_pet_to_carry(state, state.get('analysis_data'), objective_level, objective_exp)
+                    next_pet = find_next_pet_to_carry(state, state.get('analysis_data'), objective_level)
                     
                     if next_pet is not None:
+                        # Update status - Setting carry
+                        update_gui_status(pid, status=f"Setting Pet {next_pet + 1}")
+                        
                         # Set next pet to carry
                         if set_carry_for_pet(window, next_pet):
                             state['current_pet_index'] = next_pet
+                            update_gui_status(pid, status="Waiting")
                     else:
                         # All pets completed
                         state['all_pets_completed'] = True
+                        update_gui_status(pid, status="Complete", pets_done=8)
+                        log_message(f"🎉 {account_name}: All pets completed!")
                 
                 # Minimize window
                 minimize_window(hwnd)
@@ -360,7 +393,7 @@ def monitor_alerts(accounts_state, accounts_info, objective_level, objective_exp
         time.sleep(ALERT_CHECK_INTERVAL)
 
 
-def start_pet_management(tracked_accounts, accounts_info, objective_exp, objective_level, 
+def start_pet_management(tracked_accounts, accounts_info, objective_level, 
                         analysis_results=None, game_folder_path=None, gui_callback=None):
     """
     Start the pet management process for selected accounts
@@ -368,7 +401,6 @@ def start_pet_management(tracked_accounts, accounts_info, objective_exp, objecti
     Args:
         tracked_accounts (list): List of PIDs to manage
         accounts_info (dict): Dictionary with account information {pid: {'name': str, ...}}
-        objective_exp (int): Target experience points to achieve
         objective_level (int): Target level for pets
         analysis_results (dict): Optional analysis results from analyze_pets()
         game_folder_path (str): Path to the game User settings folder
@@ -380,6 +412,9 @@ def start_pet_management(tracked_accounts, accounts_info, objective_exp, objecti
     global is_paused, management_active
     reset_stop_flag()
     management_active = True
+    
+    # Calculate objective EXP from level
+    objective_exp = get_exp_for_level(objective_level)
     
     # Use provided path or default
     petalert_path = game_folder_path if game_folder_path else PETEXP_FILE_PATH
@@ -412,6 +447,15 @@ def start_pet_management(tracked_accounts, accounts_info, objective_exp, objecti
             'alert_path': petalert_path
         }
     
+    # Helper for thread-safe GUI updates
+    def update_gui_status(pid, status=None, pets_done=None):
+        if gui_callback and hasattr(gui_callback, 'root'):
+            gui_callback.root.after(0, lambda: gui_callback.update_account_status(pid, status=status, pets_done=pets_done))
+    
+    def log_message(msg):
+        if gui_callback and hasattr(gui_callback, 'root'):
+            gui_callback.root.after(0, lambda: gui_callback.log(msg))
+    
     # Set initial carry for each account
     for pid, state in accounts_state.items():
         if check_stop():
@@ -421,31 +465,45 @@ def start_pet_management(tracked_accounts, accounts_info, objective_exp, objecti
         if gui_callback and hasattr(gui_callback, 'disconnect_monitor'):
             if gui_callback.disconnect_monitor.is_disconnected(pid):
                 state['all_pets_completed'] = True
+                update_gui_status(pid, status="Disconnected")
                 continue
+        
+        account_name = state['name']
+        update_gui_status(pid, status="Starting")
         
         hwnd = get_window_by_pid(pid)
         if not hwnd:
+            update_gui_status(pid, status="Window Error")
             continue
         
         window = bring_window_to_front(hwnd)
         if not window:
+            update_gui_status(pid, status="Window Error")
             continue
         
         # Find first pet to carry
-        next_pet = find_next_pet_to_carry(state, state['analysis_data'], objective_level, objective_exp)
+        next_pet = find_next_pet_to_carry(state, state['analysis_data'], objective_level)
         if next_pet is not None:
+            # Update initial pets done count
+            completed_count = sum(state['completed_pets'])
+            update_gui_status(pid, status=f"Setting Pet {next_pet + 1}", pets_done=completed_count)
+            log_message(f"🎯 {account_name}: Setting Pet {next_pet + 1} to carry")
+            
             if set_carry_for_pet(window, next_pet):
                 state['current_pet_index'] = next_pet
+                update_gui_status(pid, status="Waiting")
         else:
             # All pets already completed
             state['all_pets_completed'] = True
+            update_gui_status(pid, status="Complete", pets_done=8)
+            log_message(f"🎉 {account_name}: All pets already complete!")
         
         minimize_window(hwnd)
     
     # Start monitoring thread
     monitor_thread = threading.Thread(
         target=monitor_alerts,
-        args=(accounts_state, accounts_info, objective_level, objective_exp, gui_callback),
+        args=(accounts_state, accounts_info, objective_level, gui_callback),
         daemon=True
     )
     monitor_thread.start()

@@ -60,14 +60,14 @@ class DisconnectMonitor:
         """Get window text safely"""
         try:
             return win32gui.GetWindowText(hwnd) or ""
-        except:
+        except Exception:
             return ""
     
     def _get_class_name(self, hwnd):
         """Get window class name safely"""
         try:
             return win32gui.GetClassName(hwnd) or ""
-        except:
+        except Exception:
             return ""
     
     def _get_owner_pid(self, hwnd):
@@ -75,7 +75,7 @@ class DisconnectMonitor:
         try:
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
             return pid
-        except:
+        except Exception:
             return None
     
     def _find_child_by_class(self, parent_hwnd, class_name):
@@ -88,7 +88,7 @@ class DisconnectMonitor:
         
         try:
             win32gui.EnumChildWindows(parent_hwnd, enum_child, None)
-        except:
+        except Exception:
             pass
         
         return found
@@ -121,7 +121,7 @@ class DisconnectMonitor:
         try:
             win32gui.SendMessage(target, win32con.BM_CLICK, 0, 0)
             return True
-        except:
+        except Exception:
             return False
     
     def _poll_disconnected_dialogs(self):
@@ -161,7 +161,7 @@ class DisconnectMonitor:
         
         try:
             win32gui.EnumWindows(enum_windows, None)
-        except:
+        except Exception:
             pass
         
         return events

@@ -14,6 +14,7 @@ from memory_reader import get_all_process_ids, get_module_base_address, read_pla
 from pet_analyzer import analyze_pets
 from pet_manager import start_pet_management
 from disconnect_monitor import DisconnectMonitor
+from pet_data import get_exp_for_level
 
 
 class PetFactoryGUI:
@@ -51,10 +52,6 @@ class PetFactoryGUI:
         left_panel = tk.Frame(container, bg=self.bg_dark, width=550)
         left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(25, 10), pady=25)
         left_panel.pack_propagate(False)
-        
-        # Right panel (logs)
-        right_panel = tk.Frame(container, bg=self.bg_dark)
-        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 25), pady=25)
         
         # Right panel (logs)
         right_panel = tk.Frame(container, bg=self.bg_dark)
@@ -101,7 +98,7 @@ class PetFactoryGUI:
         self.log("D+Q pressed - Closing application...")
         try:
             keyboard.unhook_all()
-        except:
+        except Exception:
             pass
         self.root.quit()
         self.root.destroy()
@@ -175,25 +172,9 @@ class PetFactoryGUI:
                               padx=15)
         browse_btn.pack(side=tk.LEFT)
         
-        # Objective EXP section
-        objective_frame = tk.Frame(main_frame, bg=self.bg_dark)
-        objective_frame.pack(fill=tk.X, pady=(0, 5))
-        
-        tk.Label(objective_frame, text="Objective EXP:", 
-                font=("Segoe UI", 11, "bold"),
-                bg=self.bg_dark, fg=self.text_color).pack(side=tk.LEFT, padx=(0, 15))
-        
-        self.objective_exp_var = tk.StringVar(value="10000000")
-        objective_entry = tk.Entry(objective_frame, textvariable=self.objective_exp_var, 
-                                  font=("Segoe UI", 11), width=18,
-                                  bg=self.bg_medium, fg=self.text_color,
-                                  insertbackground=self.text_color,
-                                  relief=tk.FLAT, borderwidth=5)
-        objective_entry.pack(side=tk.LEFT)
-        
         # Objective Level section
         level_frame = tk.Frame(main_frame, bg=self.bg_dark)
-        level_frame.pack(fill=tk.X, pady=(0, 15))
+        level_frame.pack(fill=tk.X, pady=(0, 10))
         
         tk.Label(level_frame, text="Objective Level:", 
                 font=("Segoe UI", 11, "bold"),
@@ -201,11 +182,21 @@ class PetFactoryGUI:
         
         self.objective_level_var = tk.StringVar(value="30")
         level_entry = tk.Entry(level_frame, textvariable=self.objective_level_var, 
-                              font=("Segoe UI", 11), width=18,
+                              font=("Segoe UI", 11), width=8,
                               bg=self.bg_medium, fg=self.text_color,
                               insertbackground=self.text_color,
                               relief=tk.FLAT, borderwidth=5)
         level_entry.pack(side=tk.LEFT)
+        
+        # EXP info label (calculated from level)
+        self.exp_info_label = tk.Label(level_frame, text="", 
+                                       font=("Segoe UI", 10),
+                                       bg=self.bg_dark, fg=self.accent_blue)
+        self.exp_info_label.pack(side=tk.LEFT, padx=(15, 0))
+        
+        # Update EXP info when level changes
+        self.objective_level_var.trace('w', self._update_exp_info)
+        self._update_exp_info()  # Initial update
         
         # Disclaimer
         disclaimer_label = tk.Label(main_frame, 
@@ -231,23 +222,12 @@ class PetFactoryGUI:
                                    command=self.on_start,
                                    bg=self.accent_green, fg="#000000", 
                                    font=("Segoe UI", 14, "bold"),
-                                   width=22, height=2,
+                                   width=30, height=2,
                                    relief=tk.FLAT,
                                    cursor="hand2",
                                    activebackground="#00dd77",
                                    activeforeground="#000000")
-        self.start_btn.pack(side=tk.LEFT, padx=(0, 15))
-        
-        self.analyze_btn = tk.Button(buttons_frame, text="🔍 Analyze", 
-                                     command=self.on_analyze,
-                                     bg=self.accent_blue, fg="#000000", 
-                                     font=("Segoe UI", 14, "bold"),
-                                     width=22, height=2,
-                                     relief=tk.FLAT,
-                                     cursor="hand2",
-                                     activebackground="#0099dd",
-                                     activeforeground="#000000")
-        self.analyze_btn.pack(side=tk.LEFT)
+        self.start_btn.pack(expand=True)
     
     def _setup_right_panel(self, parent):
         """Setup the right panel with logs console"""
@@ -296,6 +276,18 @@ class PetFactoryGUI:
         
         # Initial log
         self.log("Pet Factory initialized")
+    
+    def _update_exp_info(self, *args):
+        """Update the EXP info label when objective level changes"""
+        try:
+            level = int(self.objective_level_var.get())
+            if 1 <= level <= 120:
+                exp_needed = get_exp_for_level(level)
+                self.exp_info_label.config(text=f"= {exp_needed:,} EXP needed")
+            else:
+                self.exp_info_label.config(text="Level must be 1-120")
+        except ValueError:
+            self.exp_info_label.config(text="")
     
     def log(self, message):
         """Add a message to the log console"""
@@ -369,7 +361,7 @@ class PetFactoryGUI:
         self.log("Restarting application...")
         try:
             keyboard.unhook_all()
-        except:
+        except Exception:
             pass
         
         # Get current Python executable and script
@@ -419,19 +411,20 @@ class PetFactoryGUI:
         for pid in pids:
             self.disconnect_monitor.add_pid(pid)
         
-        # Create header
-        header_frame = tk.Frame(self.accounts_frame, pady=10, bg=self.bg_medium)
+        # Configure grid columns for consistent width
+        col_widths = [150, 80, 80, 60]  # Character Name, Pets Done, Status, Track
+        
+        # Create header row
+        header_frame = tk.Frame(self.accounts_frame, bg=self.bg_medium)
         header_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        tk.Label(header_frame, text="Character Name", font=("Segoe UI", 11, "bold"), 
-                width=20, bg=self.bg_medium, fg=self.text_secondary,
-                anchor=tk.W).pack(side=tk.LEFT, padx=10)
-        tk.Label(header_frame, text="Pets Done", font=("Segoe UI", 11, "bold"), 
-                width=10, bg=self.bg_medium, fg=self.text_secondary).pack(side=tk.LEFT)
-        tk.Label(header_frame, text="Status", font=("Segoe UI", 11, "bold"), 
-                width=12, bg=self.bg_medium, fg=self.text_secondary).pack(side=tk.LEFT)
-        tk.Label(header_frame, text="Track", font=("Segoe UI", 11, "bold"), 
-                width=8, bg=self.bg_medium, fg=self.text_secondary).pack(side=tk.LEFT)
+        headers = ["Character Name", "Pets Done", "Status", "Track"]
+        for col, (header, width) in enumerate(zip(headers, col_widths)):
+            anchor = tk.W if col == 0 else tk.CENTER
+            lbl = tk.Label(header_frame, text=header, font=("Segoe UI", 11, "bold"),
+                          bg=self.bg_medium, fg=self.text_secondary, anchor=anchor)
+            lbl.grid(row=0, column=col, sticky="ew", padx=5, pady=10)
+            header_frame.columnconfigure(col, minsize=width)
         
         # Add each account
         for i, pid in enumerate(pids):
@@ -441,24 +434,29 @@ class PetFactoryGUI:
             # Alternate row colors
             row_bg = self.bg_light if i % 2 == 0 else self.bg_medium
             
-            account_frame = tk.Frame(self.accounts_frame, pady=12, bg=row_bg)
+            account_frame = tk.Frame(self.accounts_frame, bg=row_bg)
             account_frame.pack(fill=tk.X, padx=5)
             
-            # Character name
-            tk.Label(account_frame, text=player_name, font=("Segoe UI", 11), 
-                    width=20, anchor=tk.W, bg=row_bg, fg=self.text_color).pack(side=tk.LEFT, padx=10)
+            # Configure columns with same widths as header
+            for col, width in enumerate(col_widths):
+                account_frame.columnconfigure(col, minsize=width)
             
-            # Pets done label
+            # Character name (column 0)
+            tk.Label(account_frame, text=player_name, font=("Segoe UI", 11),
+                    anchor=tk.W, bg=row_bg, fg=self.text_color).grid(
+                    row=0, column=0, sticky="ew", padx=5, pady=12)
+            
+            # Pets done label (column 1)
             pets_done_label = tk.Label(account_frame, text="-", font=("Segoe UI", 10),
-                                      width=10, bg=row_bg, fg=self.text_secondary)
-            pets_done_label.pack(side=tk.LEFT)
+                                      bg=row_bg, fg=self.text_secondary, anchor=tk.CENTER)
+            pets_done_label.grid(row=0, column=1, sticky="ew", padx=5, pady=12)
             
-            # Status label
+            # Status label (column 2)
             status_label = tk.Label(account_frame, text="Idle", font=("Segoe UI", 10),
-                                   width=12, bg=row_bg, fg=self.text_secondary)
-            status_label.pack(side=tk.LEFT)
+                                   bg=row_bg, fg=self.text_secondary, anchor=tk.CENTER)
+            status_label.grid(row=0, column=2, sticky="ew", padx=5, pady=12)
             
-            # Track checkbox
+            # Track checkbox (column 3)
             track_var = tk.BooleanVar(value=False)
             track_check = tk.Checkbutton(account_frame, variable=track_var,
                                         bg=row_bg, activebackground=row_bg,
@@ -466,7 +464,7 @@ class PetFactoryGUI:
                                         fg=self.accent_green,
                                         activeforeground=self.accent_green,
                                         cursor="hand2")
-            track_check.pack(side=tk.LEFT, padx=40)
+            track_check.grid(row=0, column=3, pady=12)
             
             # Store account info
             self.accounts[pid] = {
@@ -489,15 +487,18 @@ class PetFactoryGUI:
         
         self.log(f"Starting management for {len(tracked)} account(s)")
         
-        # Get objective EXP and Level
+        # Get objective level and calculate required EXP
         try:
-            objective_exp = int(self.objective_exp_var.get())
             objective_level = int(self.objective_level_var.get())
+            if objective_level < 1 or objective_level > 120:
+                messagebox.showerror("Error", "Objective Level must be between 1 and 120!")
+                return
+            objective_exp = get_exp_for_level(objective_level)
         except ValueError:
-            messagebox.showerror("Error", "Invalid Objective EXP or Level value!")
+            messagebox.showerror("Error", "Invalid Objective Level value!")
             return
         
-        self.log(f"Objective EXP: {objective_exp:,}, Level: {objective_level}")
+        self.log(f"Objective Level: {objective_level} (requires {objective_exp:,} EXP)")
         
         # Get game folder path
         game_folder = self.game_folder_var.get()
@@ -531,7 +532,7 @@ class PetFactoryGUI:
                     self.update_account_status(pid, status="Analyzing", pets_done=0)
                 
                 # Run analysis with game folder and GUI callback
-                analysis_results = analyze_pets(tracked, self.accounts, objective_exp, objective_level,
+                analysis_results = analyze_pets(tracked, self.accounts, objective_level,
                                               game_folder_path=game_folder, gui_callback=self)
                 self.analysis_results = analysis_results
                 
@@ -541,7 +542,7 @@ class PetFactoryGUI:
                         self.update_account_status(pid, status="Error", pets_done=0)
                         self.log(f"❌ {result['name']}: {result['status']}")
                     else:
-                        # Count pets that are already at objective level or exp
+                        # Count pets that are already at objective level or have enough exp
                         completed_count = 0
                         if result.get('pets'):
                             for pet in result['pets']:
@@ -568,16 +569,16 @@ class PetFactoryGUI:
         import threading
         management_thread = threading.Thread(
             target=self._run_management,
-            args=(tracked, objective_exp, objective_level, analysis_results, game_folder),
+            args=(tracked, objective_level, analysis_results, game_folder),
             daemon=True
         )
         management_thread.start()
         
         self.log("Pet management started (Press D+F to stop)")
     
-    def _run_management(self, tracked, objective_exp, objective_level, analysis_results, game_folder):
+    def _run_management(self, tracked, objective_level, analysis_results, game_folder):
         """Run management process in background thread"""
-        results = start_pet_management(tracked, self.accounts, objective_exp, objective_level, 
+        results = start_pet_management(tracked, self.accounts, objective_level, 
                                       analysis_results, game_folder_path=game_folder, 
                                       gui_callback=self)
         
@@ -594,72 +595,6 @@ class PetFactoryGUI:
             self.log(f"Account: {data['name']}")
             self.log(f"  Status: {data['status']}")
             self.log(f"  Pets Completed: {data['pets_completed']}/8")
-    
-    def on_analyze(self):
-        """Handle Analyze button click"""
-        # Get tracked accounts
-        tracked = [pid for pid, info in self.accounts.items() if info['track'].get()]
-        
-        if not tracked:
-            messagebox.showwarning("Warning", "No accounts selected for tracking!")
-            return
-        
-        # Get objective values
-        try:
-            objective_exp = int(self.objective_exp_var.get()) if self.objective_exp_var.get() else None
-            objective_level = int(self.objective_level_var.get()) if self.objective_level_var.get() else None
-        except ValueError:
-            self.log("Invalid objective values, analyzing without upgrades")
-            objective_exp = None
-            objective_level = None
-        
-        self.log(f"Starting analysis for {len(tracked)} account(s)...")
-        
-        # Get game folder path
-        game_folder = self.game_folder_var.get()
-        if not os.path.exists(game_folder):
-            self.log(f"⚠️ Warning: Game folder not found: {game_folder}")
-            messagebox.showerror("Invalid Path", 
-                               f"Game folder does not exist:\n{game_folder}\n\n"
-                               "Please set the correct path to the User settings folder.")
-            return
-        
-        # Mark all tracked accounts as Analyzing
-        for pid in tracked:
-            self.update_account_status(pid, status="Analyzing", pets_done=0)
-        
-        # Analyze pets with objectives and game folder
-        self.analysis_results = analyze_pets(tracked, self.accounts, objective_exp, objective_level, 
-                                            game_folder_path=game_folder, gui_callback=self)
-        
-        # Update final status for all accounts
-        for pid, result in self.analysis_results.items():
-            if result.get('error'):
-                self.update_account_status(pid, status="Error", pets_done=0)
-                self.log(f"❌ {result['name']}: {result['status']}")
-            else:
-                # Count pets that are already at objective level or exp
-                completed_count = 0
-                if result.get('pets'):
-                    for pet in result['pets']:
-                        if pet['level'] >= objective_level or pet['current_exp'] >= objective_exp:
-                            completed_count += 1
-                
-                pets_count = len(result.get('pets', []))
-                self.update_account_status(pid, status="Analyzed", pets_done=completed_count)
-                self.log(f"✓ {result['name']}: Analysis complete ({pets_count}/8 pets found, {completed_count} ready)")
-        
-        # Check if analysis was successful
-        successful = sum(1 for r in self.analysis_results.values() if not r.get('error', True))
-        
-        if successful > 0:
-            self.log(f"Analysis complete: {successful} account(s) analyzed")
-            self.log("✓ Ready for Start - Pets will be managed based on analysis data")
-        else:
-            self.log("❌ Analysis failed for all accounts")
-            messagebox.showerror("Analysis Failed", 
-                               "Could not analyze any accounts.\n"
-                               "Please check that Origin.exe is running.")
 
 
 def main():

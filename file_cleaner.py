@@ -6,17 +6,22 @@ import os
 import glob
 
 
-PETEXP_FILE_PATH = r"C:\Godswar Origin\Localization\en_us\Settings\User"
+PETEXP_FILE_PATH = r"C:\Godswar Origin\Localization\en_us\Settings\User"  # Default path
 
 
-def clean_pet_files():
+def clean_pet_files(folder_path=None):
     """
     Delete all _petexp.txt and _petalert.txt files from the settings directory
+    
+    Args:
+        folder_path (str): Optional custom path. Uses PETEXP_FILE_PATH if not provided.
     
     Returns:
         dict: Information about cleaned files
     """
-    if not os.path.exists(PETEXP_FILE_PATH):
+    target_path = folder_path if folder_path else PETEXP_FILE_PATH
+    
+    if not os.path.exists(target_path):
         return {
             'success': False,
             'error': 'Settings directory not found',
@@ -27,7 +32,7 @@ def clean_pet_files():
     
     try:
         # Find and delete all *_petexp.txt files
-        petexp_files = glob.glob(os.path.join(PETEXP_FILE_PATH, "*_petexp.txt"))
+        petexp_files = glob.glob(os.path.join(target_path, "*_petexp.txt"))
         for file_path in petexp_files:
             try:
                 os.remove(file_path)
@@ -36,7 +41,7 @@ def clean_pet_files():
                 print(f"Could not delete {file_path}: {e}")
         
         # Find and delete all *_petalert.txt files
-        petalert_files = glob.glob(os.path.join(PETEXP_FILE_PATH, "*_petalert.txt"))
+        petalert_files = glob.glob(os.path.join(target_path, "*_petalert.txt"))
         for file_path in petalert_files:
             try:
                 os.remove(file_path)

@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 import keyboard
 from file_cleaner import clean_pet_files
+from pet_data import get_exp_for_level
 
 # Disable PyAutoGUI fail-safe
 pyautogui.FAILSAFE = False
@@ -46,18 +47,6 @@ PETEXP_FILE_PATH = r"C:\Godswar Origin\Localization\en_us\Settings\User"
 
 # Global pause flag
 is_paused = False
-
-
-def setup_stop_hotkey():
-    """Setup D+F hotkey to pause/resume the process"""
-    keyboard.add_hotkey('d+f', lambda: toggle_pause())
-
-
-def toggle_pause():
-    """Toggle the pause state"""
-    global is_paused
-    is_paused = not is_paused
-    print(f"Process {'PAUSED' if is_paused else 'RESUMED'}")
 
 
 def check_stop():
@@ -304,7 +293,7 @@ def delete_petexp_file(file_path):
     try:
         if os.path.exists(file_path):
             os.remove(file_path)
-    except:
+    except Exception:
         pass
 
 
@@ -322,7 +311,7 @@ def delete_petalert_file(file_path):
         pass
 
 
-def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_level=None, 
+def analyze_pets(tracked_accounts, accounts_info, objective_level=None, 
                 game_folder_path=None, gui_callback=None):
     """
     Analyze pets for selected accounts
@@ -330,7 +319,6 @@ def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_
     Args:
         tracked_accounts (list): List of PIDs to analyze
         accounts_info (dict): Dictionary with account information {pid: {'name': str, ...}}
-        objective_exp (int): Optional target EXP for upgrading pets
         objective_level (int): Optional target level for upgrading pets
         game_folder_path (str): Path to the game User settings folder
         gui_callback: Optional GUI object to update status
@@ -340,6 +328,9 @@ def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_
     """
     global is_paused
     reset_stop_flag()
+    
+    # Calculate objective EXP from level if provided
+    objective_exp = get_exp_for_level(objective_level) if objective_level else None
     
     # Use provided path or default
     petexp_path = game_folder_path if game_folder_path else PETEXP_FILE_PATH
@@ -423,7 +414,7 @@ def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_
         
         for pet_index in range(8):
             if gui_callback:
-                gui_callback.update_account_status(pid, pets_done=pet_index)
+                gui_callback.update_account_status(pid, status=f"Scanning Pet {pet_index + 1}", pets_done=pet_index)
             if not process_single_pet(window, pet_index):
                 results[pid] = {
                     'name': account_name,
@@ -433,6 +424,10 @@ def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_
                 }
                 minimize_window(hwnd)
                 return results
+        
+        # Update status - Reading file
+        if gui_callback:
+            gui_callback.update_account_status(pid, status="Reading data")
         
         # Wait a moment for file to be written
         time.sleep(2)
@@ -463,10 +458,12 @@ def analyze_pets(tracked_accounts, accounts_info, objective_exp=None, objective_
             # Upgrade pets that need it (pet tab is still open from analysis)
             if pets_to_upgrade:
                 if gui_callback:
+                    gui_callback.update_account_status(pid, status=f"Upgrading {len(pets_to_upgrade)} pets")
                     gui_callback.log(f"  ⬆️ Upgrading {len(pets_to_upgrade)} pet(s) with sufficient EXP...")
                 for pet_index in pets_to_upgrade:
                     pet_name = pets_data[pet_index]['name']
                     if gui_callback:
+                        gui_callback.update_account_status(pid, status=f"Upgrading Pet {pet_index + 1}")
                         gui_callback.log(f"    • Upgrading {pet_name} (Pet {pet_index + 1})...")
                     if not upgrade_pet_levels(window, pet_index):
                         break
