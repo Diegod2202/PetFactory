@@ -41,7 +41,6 @@ UPGRADE_COORD = (282, 555)
 
 # Settings
 CLICK_DELAY = 0.7  # 700ms delay between clicks
-UPGRADE_CLICKS = 30
 UPGRADE_CLICK_DELAY = 0.2
 PETEXP_FILE_PATH = r"C:\Godswar Origin\Localization\en_us\Settings\User"
 
@@ -174,17 +173,25 @@ def minimize_window(hwnd):
     time.sleep(0.3)
 
 
-def upgrade_pet_levels(window, pet_index):
+def upgrade_pet_levels(window, pet_index, current_level, objective_level):
     """
-    Upgrade a pet's level 30 times
+    Upgrade a pet's level to objective level
     
     Args:
         window: pygetwindow Window object
         pet_index: Index of the pet (0-7)
+        current_level: Current level of the pet
+        objective_level: Target level to reach
     
     Returns:
         bool: Success status
     """
+    # Calculate upgrade clicks needed
+    upgrade_clicks = max(0, objective_level - current_level)
+    
+    if upgrade_clicks == 0:
+        return True  # Already at or above objective
+    
     # Click on pet
     pet_x, pet_y = PET_COORDINATES[pet_index]
     if not click_at_window_position(window, pet_x, pet_y):
@@ -194,8 +201,8 @@ def upgrade_pet_levels(window, pet_index):
     if not click_at_window_position(window, *DETAILS_COORD):
         return False
     
-    # Click upgrade button 30 times
-    for i in range(UPGRADE_CLICKS):
+    # Click upgrade button (dynamic amount)
+    for i in range(upgrade_clicks):
         if check_stop():
             return False
         screen_x = window.left + UPGRADE_COORD[0]
@@ -461,11 +468,14 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
                     gui_callback.update_account_status(pid, status=f"Upgrading {len(pets_to_upgrade)} pets")
                     gui_callback.log(f"  ⬆️ Upgrading {len(pets_to_upgrade)} pet(s) with sufficient EXP...")
                 for pet_index in pets_to_upgrade:
-                    pet_name = pets_data[pet_index]['name']
+                    pet = pets_data[pet_index]
+                    pet_name = pet['name']
+                    current_level = pet['level']
+                    upgrade_count = objective_level - current_level
                     if gui_callback:
                         gui_callback.update_account_status(pid, status=f"Upgrading Pet {pet_index + 1}")
-                        gui_callback.log(f"    • Upgrading {pet_name} (Pet {pet_index + 1})...")
-                    if not upgrade_pet_levels(window, pet_index):
+                        gui_callback.log(f"    • Upgrading {pet_name} (Pet {pet_index + 1}) from Lv{current_level} to Lv{objective_level} (+{upgrade_count})")
+                    if not upgrade_pet_levels(window, pet_index, current_level, objective_level):
                         break
             
             # Set best pet to carry if found
