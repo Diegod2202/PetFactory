@@ -268,6 +268,10 @@ def find_next_pet_to_carry(account_state, analysis_data, objective_level):
             if account_state['completed_pets'][i]:
                 continue
             
+            # Skip if pet is None (ignored or invalid)
+            if pet is None:
+                continue
+            
             if pet['level'] >= objective_level or pet['current_exp'] >= objective_exp:
                 account_state['completed_pets'][i] = True  # Mark as completed if at level/exp
                 continue

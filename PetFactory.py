@@ -200,7 +200,7 @@ class PetFactoryGUI:
         self.exp_info_label.pack(side=tk.LEFT, padx=(15, 0))
         
         # Update EXP info when level changes
-        self.objective_level_var.trace('w', self._update_exp_info)
+        self.objective_level_var.trace_add('write', self._update_exp_info)
         self._update_exp_info()  # Initial update
         
         # Disclaimer
