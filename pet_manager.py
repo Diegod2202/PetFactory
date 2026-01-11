@@ -308,10 +308,10 @@ def monitor_alerts(accounts_state, accounts_info, objective_level, gui_callback=
     if ignored_pets is None:
         ignored_pets = {}
     
-    def update_gui_status(pid, status=None, pets_done=None):
+    def update_gui_status(pid, status=None, pets_done=None, total_pets=None):
         """Thread-safe GUI update"""
         if gui_callback and hasattr(gui_callback, 'root'):
-            gui_callback.root.after(0, lambda: gui_callback.update_account_status(pid, status=status, pets_done=pets_done))
+            gui_callback.root.after(0, lambda: gui_callback.update_account_status(pid, status=status, pets_done=pets_done, total_pets=total_pets))
     
     def log_message(msg):
         """Thread-safe log"""
@@ -367,10 +367,13 @@ def monitor_alerts(accounts_state, accounts_info, objective_level, gui_callback=
                     if current_pet is not None:
                         state['completed_pets'][current_pet] = True
                     
-                    # Update pets done count
-                    completed_count = sum(state['completed_pets'])
-                    update_gui_status(pid, pets_done=completed_count)
-                    log_message(f"✅ {account_name}: Pet {pet_num} reached Lv{objective_level} ({completed_count}/8)")
+                    # Update pets done count (excluding ignored pets from both completed and total)
+                    ignored_count = len(state.get('ignored_pets', []))
+                    total_pets = 8 - ignored_count
+                    # Count completed pets that are NOT ignored
+                    completed_count = sum(1 for i, done in enumerate(state['completed_pets']) if done and i not in state.get('ignored_pets', []))
+                    update_gui_status(pid, pets_done=completed_count, total_pets=total_pets)
+                    log_message(f"✅ {account_name}: Pet {pet_num} reached Lv{objective_level} ({completed_count}/{total_pets})")
                     
                     # Find next pet
                     next_pet = find_next_pet_to_carry(state, state.get('analysis_data'), objective_level)
@@ -386,7 +389,9 @@ def monitor_alerts(accounts_state, accounts_info, objective_level, gui_callback=
                     else:
                         # All pets completed
                         state['all_pets_completed'] = True
-                        update_gui_status(pid, status="Complete", pets_done=8)
+                        ignored_count = len(state.get('ignored_pets', []))
+                        total_pets = 8 - ignored_count
+                        update_gui_status(pid, status="Complete", pets_done=total_pets, total_pets=total_pets)
                         log_message(f"🎉 {account_name}: All pets completed!")
                 
                 # Minimize window
@@ -435,6 +440,7 @@ def start_pet_management(tracked_accounts, accounts_info, objective_level,
     for pid in tracked_accounts:
         account_name = accounts_info.get(pid, {}).get('name', '')
         analysis_data = None
+        carry_pet_index = None  # Will be set if analysis already determined carry
         completed_pets = [False] * 8
         
         # Get ignored pets for this account
@@ -450,10 +456,14 @@ def start_pet_management(tracked_accounts, accounts_info, objective_level,
             if not result.get('error') and result.get('all_pets'):
                 # Use all_pets (unfiltered) for index-based operations
                 analysis_data = result.get('all_pets', result.get('pets', []))
+                # Get carry pet index from analysis (if already set)
+                carry_pet_index = result.get('carry_pet_index')
                 # Mark pets at or above objective level/exp as completed
                 for i, pet in enumerate(analysis_data):
                     if i in account_ignored:
                         continue  # Already marked
+                    if pet is None:
+                        continue  # Skip None entries (ignored pets)
                     if pet['level'] >= objective_level or pet['current_exp'] >= objective_exp:
                         completed_pets[i] = True
         
@@ -462,15 +472,16 @@ def start_pet_management(tracked_accounts, accounts_info, objective_level,
             'analysis_data': analysis_data,
             'completed_pets': completed_pets,
             'ignored_pets': account_ignored,
+            'carry_pet_index': carry_pet_index,  # Store carry index from analysis
             'current_pet_index': None,
             'all_pets_completed': False,
             'alert_path': petalert_path
         }
     
     # Helper for thread-safe GUI updates
-    def update_gui_status(pid, status=None, pets_done=None):
+    def update_gui_status(pid, status=None, pets_done=None, total_pets=None):
         if gui_callback and hasattr(gui_callback, 'root'):
-            gui_callback.root.after(0, lambda: gui_callback.update_account_status(pid, status=status, pets_done=pets_done))
+            gui_callback.root.after(0, lambda: gui_callback.update_account_status(pid, status=status, pets_done=pets_done, total_pets=total_pets))
     
     def log_message(msg):
         if gui_callback and hasattr(gui_callback, 'root'):
@@ -489,6 +500,23 @@ def start_pet_management(tracked_accounts, accounts_info, objective_level,
                 continue
         
         account_name = state['name']
+        
+        # Calculate total pets for this account (excluding ignored)
+        ignored_count = len(state.get('ignored_pets', []))
+        total_pets = 8 - ignored_count
+        
+        # Check if analysis already set a pet to carry
+        carry_from_analysis = state.get('carry_pet_index')
+        
+        if carry_from_analysis is not None:
+            # Analysis already set carry, just update state without touching the window
+            state['current_pet_index'] = carry_from_analysis
+            completed_count = sum(1 for i, done in enumerate(state['completed_pets']) if done and i not in state.get('ignored_pets', []))
+            update_gui_status(pid, status="Waiting", pets_done=completed_count, total_pets=total_pets)
+            # Don't log again since analyzer already logged this
+            continue
+        
+        # No analysis or no carry set - need to set it manually
         update_gui_status(pid, status="Starting")
         
         hwnd = get_window_by_pid(pid)
@@ -503,10 +531,11 @@ def start_pet_management(tracked_accounts, accounts_info, objective_level,
         
         # Find first pet to carry
         next_pet = find_next_pet_to_carry(state, state['analysis_data'], objective_level)
+        
         if next_pet is not None:
-            # Update initial pets done count
-            completed_count = sum(state['completed_pets'])
-            update_gui_status(pid, status=f"Setting Pet {next_pet + 1}", pets_done=completed_count)
+            # Update initial pets done count (excluding ignored pets)
+            completed_count = sum(1 for i, done in enumerate(state['completed_pets']) if done and i not in state.get('ignored_pets', []))
+            update_gui_status(pid, status=f"Setting Pet {next_pet + 1}", pets_done=completed_count, total_pets=total_pets)
             log_message(f"🎯 {account_name}: Setting Pet {next_pet + 1} to carry")
             
             if set_carry_for_pet(window, next_pet):
@@ -515,7 +544,7 @@ def start_pet_management(tracked_accounts, accounts_info, objective_level,
         else:
             # All pets already completed
             state['all_pets_completed'] = True
-            update_gui_status(pid, status="Complete", pets_done=8)
+            update_gui_status(pid, status="Complete", pets_done=total_pets, total_pets=total_pets)
             log_message(f"🎉 {account_name}: All pets already complete!")
         
         minimize_window(hwnd)
@@ -543,12 +572,16 @@ def start_pet_management(tracked_accounts, accounts_info, objective_level,
     # Return results
     results = {}
     for pid, state in accounts_state.items():
-        completed_count = sum(state['completed_pets'])
+        ignored_count = len(state.get('ignored_pets', []))
+        total_pets = 8 - ignored_count
+        # Count completed pets that are NOT ignored
+        completed_count = sum(1 for i, done in enumerate(state['completed_pets']) if done and i not in state.get('ignored_pets', []))
         results[pid] = {
             'name': state['name'],
             'pets_completed': completed_count,
+            'total_pets': total_pets,
             'all_completed': state['all_pets_completed'],
-            'status': 'Completed' if state['all_pets_completed'] else f'{completed_count}/8 pets done'
+            'status': 'Completed' if state['all_pets_completed'] else f'{completed_count}/{total_pets} pets done'
         }
     
     return results

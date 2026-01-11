@@ -489,8 +489,8 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
         
         if gui_callback:
             total_found = len(valid_pets)
-            ignored_count = len(account_ignored)
-            gui_callback.log(f"  ✓ Found {total_found} pets in file ({total_found} processed, {ignored_count} ignored)")
+            total_expected = 8 - len(account_ignored)  # Total pets we expected to process
+            gui_callback.log(f"  ✓ Found {total_found} pets in file ({total_found}/{total_expected} expected)")
         
         # Filter out ignored pets from data (remove None entries)
         filtered_pets_data = valid_pets
@@ -542,6 +542,8 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
                 pet_x, pet_y = PET_COORDINATES[best_pet_index]
                 click_at_window_position(window, pet_x, pet_y)
                 click_at_window_position(window, *CARRY_COORD)
+                # Also open Details so the game can detect when pet is ready
+                click_at_window_position(window, *DETAILS_COORD)
         
         # Delete the petexp and petalert files
         delete_petexp_file(petexp_file)
@@ -557,20 +559,22 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
         
         # Store results (with filtered pets, excluding ignored ones)
         ignored_count = len(account_ignored)
-        total_pets = len(pets_data)
-        valid_pets = len(filtered_pets_data)
+        total_expected = 8 - ignored_count  # Total pets we expected to process
+        actual_valid = len(filtered_pets_data)
         
         status_msg = 'Success'
-        if total_pets < 8:
-            status_msg = f'Only {total_pets} pets found'
+        if actual_valid < total_expected:
+            status_msg = f'Only {actual_valid}/{total_expected} pets found'
         elif ignored_count > 0:
-            status_msg = f'Success ({valid_pets} valid, {ignored_count} ignored)'
+            status_msg = f'Success ({actual_valid} valid, {ignored_count} ignored)'
         
         results[pid] = {
             'name': account_name,
             'pets': filtered_pets_data,
             'all_pets': pets_data,  # Keep original for reference
             'ignored_indices': account_ignored,
+            'total_pets': total_expected,  # Add total pets count (excluding ignored)
+            'carry_pet_index': best_pet_index,  # Store which pet is currently set to carry
             'status': status_msg,
             'error': False
         }

@@ -432,7 +432,7 @@ class PetFactoryGUI:
         self.log_text.config(state=tk.DISABLED)
         self.log("Logs cleared")
     
-    def update_account_status(self, pid, status=None, pets_done=None):
+    def update_account_status(self, pid, status=None, pets_done=None, total_pets=None):
         """Update the status display for an account"""
         if pid not in self.accounts:
             return
@@ -458,10 +458,15 @@ class PetFactoryGUI:
             elif "Error" in status:
                 account['status_label'].config(fg="#ff4444")
         
+        # Update total_pets if provided
+        if total_pets is not None:
+            account['total_pets'] = total_pets
+        
         if pets_done is not None:
             account['pets_done'] = pets_done
-            # During analysis, show progress; during management, show completed
-            account['pets_done_label'].config(text=f"{pets_done}/8")
+            # Use stored total_pets or default to 8
+            total = account.get('total_pets', 8)
+            account['pets_done_label'].config(text=f"{pets_done}/{total}")
     
     def on_disconnect_detected(self, pid, message):
         """Called by DisconnectMonitor when a disconnect is detected"""
@@ -611,6 +616,7 @@ class PetFactoryGUI:
             self.accounts[pid] = {
                 'name': player_name,
                 'track': track_var,
+                'total_pets': 8 - len(self.ignored_pets.get(player_name, [])),  # Initialize with ignored pets count
                 'pets_done_label': pets_done_label,
                 'status_label': status_label,
                 'ignore_btn': ignore_btn,
@@ -702,8 +708,9 @@ class PetFactoryGUI:
                                     completed_count += 1
                         
                         pets_count = len(result.get('pets', []))
-                        self.update_account_status(pid, status="Analyzed", pets_done=completed_count)
-                        self.log(f"✓ {result['name']}: Analysis complete ({pets_count}/8 pets found, {completed_count} ready)")
+                        total_pets = result.get('total_pets', 8)  # Get total from result (excludes ignored)
+                        self.update_account_status(pid, status="Analyzed", pets_done=completed_count, total_pets=total_pets)
+                        self.log(f"✓ {result['name']}: Analysis complete ({pets_count}/{total_pets} pets found, {completed_count} ready)")
                 
                 # Check if analysis was successful
                 successful = sum(1 for r in analysis_results.values() if not r.get('error', True))
@@ -748,9 +755,10 @@ class PetFactoryGUI:
         self.log("=" * 40)
         
         for pid, data in results.items():
+            total_pets = data.get('total_pets', 8)
             self.log(f"Account: {data['name']}")
             self.log(f"  Status: {data['status']}")
-            self.log(f"  Pets Completed: {data['pets_completed']}/8")
+            self.log(f"  Pets Completed: {data['pets_completed']}/{total_pets}")
 
 
 def main():
