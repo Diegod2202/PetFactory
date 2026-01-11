@@ -14,30 +14,10 @@ from pathlib import Path
 import keyboard
 from file_cleaner import clean_pet_files
 from pet_data import get_exp_for_level
+from ui_assets import get_pet_coord, get_ui_coord
 
 # Disable PyAutoGUI fail-safe
 pyautogui.FAILSAFE = False
-
-
-# Pet coordinates (relative to window)
-PET_COORDINATES = [
-    (172, 378),  # Pet 1
-    (242, 378),  # Pet 2
-    (307, 378),  # Pet 3
-    (380, 378),  # Pet 4
-    (172, 427),  # Pet 5
-    (242, 427),  # Pet 6
-    (307, 427),  # Pet 7
-    (380, 427),  # Pet 8
-]
-
-# UI coordinates
-PET_TAB_COORD = (885, 715)
-CARRY_COORD = (183, 485)
-DETAILS_COORD = (278, 486)
-SAVE_COORD = (287, 530)
-CLOSE_PET_COORD = (400, 105)
-UPGRADE_COORD = (282, 555)
 
 # Settings
 CLICK_DELAY = 0.7  # 700ms delay between clicks
@@ -193,58 +173,81 @@ def upgrade_pet_levels(window, pet_index, current_level, objective_level):
         return True  # Already at or above objective
     
     # Click on pet
-    pet_x, pet_y = PET_COORDINATES[pet_index]
-    if not click_at_window_position(window, pet_x, pet_y):
+    pet_coords = get_pet_coord(window, pet_index)
+    if not pet_coords or not click_at_window_position(window, *pet_coords):
         return False
     
     # Click on Details
-    if not click_at_window_position(window, *DETAILS_COORD):
+    details_coords = get_ui_coord(window, "DETAILS")
+    if not details_coords or not click_at_window_position(window, *details_coords):
         return False
     
     # Click upgrade button (dynamic amount)
+    upgrade_coords = get_ui_coord(window, "UPGRADE")
+    if not upgrade_coords:
+        return False
     for i in range(upgrade_clicks):
         if check_stop():
             return False
-        screen_x = window.left + UPGRADE_COORD[0]
-        screen_y = window.top + UPGRADE_COORD[1]
+        screen_x = window.left + upgrade_coords[0]
+        screen_y = window.top + upgrade_coords[1]
         pyautogui.moveTo(screen_x, screen_y, duration=0.1)
         time.sleep(0.1)
         pyautogui.click(screen_x, screen_y)
         time.sleep(UPGRADE_CLICK_DELAY)
     
     # Close pet
-    if not click_at_window_position(window, *CLOSE_PET_COORD):
+    close_coords = get_ui_coord(window, "CLOSE_PET")
+    if not close_coords or not click_at_window_position(window, *close_coords):
         return False
     
     return True
 
 
-def process_single_pet(window, pet_index):
+def process_single_pet(window, pet_index, gui_callback=None):
     """
     Process a single pet (click through the UI sequence)
     
     Args:
         window: pygetwindow Window object
         pet_index (int): Index of the pet (0-7)
+        gui_callback: Callback object for logging
     
     Returns:
         bool: True if completed, False if stopped
     """
     # Click on pet
-    pet_x, pet_y = PET_COORDINATES[pet_index]
-    if not click_at_window_position(window, pet_x, pet_y):
+    pet_coords = get_pet_coord(window, pet_index)
+    if not pet_coords:
+        # Retry once for pet slot
+        time.sleep(0.5)
+        pet_coords = get_pet_coord(window, pet_index)
+        
+    if not pet_coords or not click_at_window_position(window, *pet_coords):
+        if gui_callback:
+             gui_callback.log(f"[DEBUG] Failed to find/click PET_{pet_index+1}")
         return False
     
     # Click on Details
-    if not click_at_window_position(window, *DETAILS_COORD):
+    details_coords = get_ui_coord(window, "DETAILS")
+    if not details_coords or not click_at_window_position(window, *details_coords):
         return False
     
-    # Click on Save
-    if not click_at_window_position(window, *SAVE_COORD):
+    # Click on Save - Retry logic as the window animation takes time
+    save_coords = None
+    for _ in range(3): # Try 3 times
+        time.sleep(0.5) # Wait for animation
+        save_coords = get_ui_coord(window, "SAVE")
+        if save_coords:
+            break
+            
+    if not save_coords or not click_at_window_position(window, *save_coords):
+        print(f"[DEBUG] Failed to find SAVE button for PET_{pet_index+1}")
         return False
     
     # Click on Close Pet
-    if not click_at_window_position(window, *CLOSE_PET_COORD):
+    close_coords = get_ui_coord(window, "CLOSE_PET")
+    if not close_coords or not click_at_window_position(window, *close_coords):
         return False
     
     return True
@@ -421,7 +424,8 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
         # Click on Pet tab
         if gui_callback:
             gui_callback.update_account_status(pid, status="Opening Pet tab")
-        if not click_at_window_position(window, *PET_TAB_COORD):
+        pet_tab_coords = get_ui_coord(window, "PET_TAB")
+        if not pet_tab_coords or not click_at_window_position(window, *pet_tab_coords):
             results[pid] = {
                 'name': account_name,
                 'pets': [],
@@ -452,7 +456,7 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
             if gui_callback:
                 gui_callback.update_account_status(pid, status=f"Scanning Pet {pet_index + 1}", pets_done=len(processed_pet_indices))
             
-            if not process_single_pet(window, pet_index):
+            if not process_single_pet(window, pet_index, gui_callback):
                 results[pid] = {
                     'name': account_name,
                     'pets': [],
@@ -539,11 +543,16 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
                 best_pet_name = pets_data[best_pet_index]['name']
                 if gui_callback:
                     gui_callback.log(f"  🎯 Setting {best_pet_name} (Pet {best_pet_index + 1}) to carry")
-                pet_x, pet_y = PET_COORDINATES[best_pet_index]
-                click_at_window_position(window, pet_x, pet_y)
-                click_at_window_position(window, *CARRY_COORD)
+                pet_coords = get_pet_coord(window, best_pet_index)
+                if pet_coords:
+                    click_at_window_position(window, *pet_coords)
+                carry_coords = get_ui_coord(window, "CARRY")
+                if carry_coords:
+                    click_at_window_position(window, *carry_coords)
                 # Also open Details so the game can detect when pet is ready
-                click_at_window_position(window, *DETAILS_COORD)
+                details_coords = get_ui_coord(window, "DETAILS")
+                if details_coords:
+                    click_at_window_position(window, *details_coords)
         
         # Delete the petexp and petalert files
         delete_petexp_file(petexp_file)
@@ -551,7 +560,9 @@ def analyze_pets(tracked_accounts, accounts_info, objective_level=None,
         delete_petalert_file(petalert_file)
         
         # Close the pet window by clicking on Pet tab again
-        click_at_window_position(window, *PET_TAB_COORD)
+        pet_tab_coords = get_ui_coord(window, "PET_TAB")
+        if pet_tab_coords:
+            click_at_window_position(window, *pet_tab_coords)
         time.sleep(0.3)
         
         # Minimize the window

@@ -14,30 +14,13 @@ import keyboard
 import threading
 from file_cleaner import clean_pet_files
 from pet_data import get_exp_for_level
+from ui_assets import get_pet_coord, get_ui_coord
 
 # Disable PyAutoGUI fail-safe
 pyautogui.FAILSAFE = False
 
 
-# Pet coordinates (relative to window)
-PET_COORDINATES = [
-    (172, 378),  # Pet 1
-    (242, 378),  # Pet 2
-    (307, 378),  # Pet 3
-    (380, 378),  # Pet 4
-    (172, 427),  # Pet 5
-    (242, 427),  # Pet 6
-    (307, 427),  # Pet 7
-    (380, 427),  # Pet 8
-]
 
-# UI coordinates
-PET_TAB_COORD = (885, 715)
-CARRY_COORD = (183, 485)
-DETAILS_COORD = (276, 488)
-ALERT_DETAILS_COORD = (70, 134)
-UPGRADE_COORD = (282, 555)
-CLOSE_PET_COORD = (408, 109)
 
 # Settings
 CLICK_DELAY = 0.45
@@ -193,24 +176,28 @@ def set_carry_for_pet(window, pet_index):
         bool: Success status
     """
     # Open pet tab
-    if not click_at_window_position(window, *PET_TAB_COORD):
+    pet_tab_coords = get_ui_coord(window, "PET_TAB")
+    if not pet_tab_coords or not click_at_window_position(window, *pet_tab_coords):
         return False
     
     # Click on pet
-    pet_x, pet_y = PET_COORDINATES[pet_index]
-    if not click_at_window_position(window, pet_x, pet_y):
+    pet_coords = get_pet_coord(window, pet_index)
+    if not pet_coords or not click_at_window_position(window, *pet_coords):
         return False
     
     # Click Carry
-    if not click_at_window_position(window, *CARRY_COORD):
+    carry_coords = get_ui_coord(window, "CARRY")
+    if not carry_coords or not click_at_window_position(window, *carry_coords):
         return False
     
     # Open Details so the game can detect when pet is ready
-    if not click_at_window_position(window, *DETAILS_COORD):
+    details_coords = get_ui_coord(window, "DETAILS")
+    if not details_coords or not click_at_window_position(window, *details_coords):
         return False
     
     # Close pet tab
-    if not click_at_window_position(window, *PET_TAB_COORD):
+    pet_tab_coords2 = get_ui_coord(window, "PET_TAB")
+    if not pet_tab_coords2 or not click_at_window_position(window, *pet_tab_coords2):
         return False
     
     return True
@@ -238,17 +225,17 @@ def process_pet_alert(window, account_name, current_level, objective_level, aler
         delete_alert_file(account_name, alert_path)
         return True
     
-    # Right-click on alert details
-    if not click_at_window_position(window, *ALERT_DETAILS_COORD, button='right'):
+    # Click upgrade button (Details tab is already open) (dynamic amount based on level difference)
+    upgrade_coords = get_ui_coord(window, "UPGRADE")
+    if not upgrade_coords:
         return False
-    
-    # Click upgrade button (dynamic amount based on level difference)
     for i in range(upgrade_clicks):
-        if not click_at_window_position(window, *UPGRADE_COORD, delay=UPGRADE_CLICK_DELAY):
+        if not click_at_window_position(window, *upgrade_coords, delay=UPGRADE_CLICK_DELAY):
             return False
     
     # Close pet details
-    if not click_at_window_position(window, *CLOSE_PET_COORD):
+    close_coords = get_ui_coord(window, "CLOSE_PET")
+    if not close_coords or not click_at_window_position(window, *close_coords):
         return False
     
     # Delete the alert file
