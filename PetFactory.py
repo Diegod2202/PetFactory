@@ -22,7 +22,7 @@ class PetFactoryGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Pet Factory")
-        self.root.geometry("1100x850")
+        self.root.geometry("1400x950")
         
         # Dark theme colors
         self.bg_dark = "#1a1a1a"
@@ -42,6 +42,19 @@ class PetFactoryGUI:
         self.analysis_results = {}  # Store analysis results for Start to use
         self.ignored_pets = {}  # {character_name: [list of ignored pet indices 0-7]}
         
+        # Auto Merge Variables
+        self.merge_locked_account = None  # PID of locked account for merging
+        self.merge_config = {
+            'receiver_slot': 0,      # Pet slot to receive merges (0-7)
+            'provider_slot': 7,      # Pet slot to provide merges (0-7)
+            'use_merged_spirit': False,
+            'max_merges': 999,
+            'final_pet_slot': 0,     # Pet to carry after merges
+            'afk_spot': 'thermopylae'
+        }
+        self.merge_spirits_available = True  # Track if spirits need refill
+        self.merged_pets_count = 0           # Counter for merged pets
+        
         # Load ignored pets from file
         self._load_ignored_pets()
         
@@ -53,8 +66,8 @@ class PetFactoryGUI:
         container = tk.Frame(root, bg=self.bg_dark)
         container.pack(fill=tk.BOTH, expand=True)
         
-        # Left panel (existing UI)
-        left_panel = tk.Frame(container, bg=self.bg_dark, width=550)
+        # Left panel (Auto Merge + Auto Level)
+        left_panel = tk.Frame(container, bg=self.bg_dark, width=600)
         left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(25, 10), pady=25)
         left_panel.pack_propagate(False)
         
@@ -62,7 +75,10 @@ class PetFactoryGUI:
         right_panel = tk.Frame(container, bg=self.bg_dark)
         right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 25), pady=25)
         
-        # Setup left panel (existing UI)
+        # Setup Auto Merge panel (top of left panel)
+        self._setup_auto_merge_panel(left_panel)
+        
+        # Setup Auto Level panel (bottom of left panel - existing UI renamed)
         self._setup_left_panel(left_panel)
         
         # Setup right panel (logs)
@@ -108,13 +124,291 @@ class PetFactoryGUI:
         self.root.quit()
         self.root.destroy()
     
-    def _setup_left_panel(self, parent):
-        """Setup the left panel with existing UI"""
+    def _setup_auto_merge_panel(self, parent):
+        """Setup the Auto Merge configuration panel"""
+        # Container frame with border
+        merge_container = tk.Frame(parent, bg=self.bg_medium, pady=10, padx=10)
+        merge_container.pack(fill=tk.X, pady=(0, 15))
+        
         # Header
-        header_frame = tk.Frame(parent, bg=self.bg_medium, pady=15)
+        header_frame = tk.Frame(merge_container, bg=self.bg_medium)
+        header_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Label(header_frame, text="🔀 Auto Merge", font=("Segoe UI", 14, "bold"),
+                bg=self.bg_medium, fg=self.accent_orange).pack(side=tk.LEFT)
+        
+        # Account Selection Row
+        account_frame = tk.Frame(merge_container, bg=self.bg_medium)
+        account_frame.pack(fill=tk.X, pady=(0, 8))
+        
+        tk.Label(account_frame, text="Account:", font=("Segoe UI", 10),
+                bg=self.bg_medium, fg=self.text_color).pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.merge_account_var = tk.StringVar(value="Select Account")
+        self.merge_account_dropdown = tk.OptionMenu(account_frame, self.merge_account_var, "Select Account")
+        self.merge_account_dropdown.config(
+            bg=self.bg_light, fg=self.text_color, font=("Segoe UI", 9),
+            activebackground=self.bg_light, highlightthickness=0, width=18
+        )
+        self.merge_account_dropdown.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.lock_account_btn = tk.Button(account_frame, text="🔓 Lock",
+                                         command=self._toggle_lock_account,
+                                         bg=self.bg_light, fg=self.text_color,
+                                         font=("Segoe UI", 9), relief=tk.FLAT,
+                                         cursor="hand2", padx=8)
+        self.lock_account_btn.pack(side=tk.LEFT)
+        
+        # Slot Configuration Row
+        slot_frame = tk.Frame(merge_container, bg=self.bg_medium)
+        slot_frame.pack(fill=tk.X, pady=(0, 8))
+        
+        # Receiver slot
+        tk.Label(slot_frame, text="Receiver Pet:", font=("Segoe UI", 10),
+                bg=self.bg_medium, fg=self.text_color).pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.receiver_slot_var = tk.StringVar(value="1")
+        receiver_spin = tk.Spinbox(slot_frame, from_=1, to=8, width=3,
+                                  textvariable=self.receiver_slot_var,
+                                  font=("Segoe UI", 10),
+                                  bg=self.bg_light, fg=self.text_color,
+                                  buttonbackground=self.bg_light,
+                                  command=self._validate_provider_slot)
+        receiver_spin.pack(side=tk.LEFT, padx=(0, 15))
+        
+        # Provider slot
+        tk.Label(slot_frame, text="Provider Pet:", font=("Segoe UI", 10),
+                bg=self.bg_medium, fg=self.text_color).pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.provider_slot_var = tk.StringVar(value="8")
+        self.provider_spin = tk.Spinbox(slot_frame, from_=2, to=8, width=3,
+                                       textvariable=self.provider_slot_var,
+                                       font=("Segoe UI", 10),
+                                       bg=self.bg_light, fg=self.text_color,
+                                       buttonbackground=self.bg_light)
+        self.provider_spin.pack(side=tk.LEFT)
+        
+        # Merged Spirit Row
+        spirit_frame = tk.Frame(merge_container, bg=self.bg_medium)
+        spirit_frame.pack(fill=tk.X, pady=(0, 8))
+        
+        self.use_spirit_var = tk.BooleanVar(value=False)
+        spirit_check = tk.Checkbutton(spirit_frame, text="Use Merged Spirit",
+                                     variable=self.use_spirit_var,
+                                     font=("Segoe UI", 10),
+                                     bg=self.bg_medium, fg=self.text_color,
+                                     activebackground=self.bg_medium,
+                                     activeforeground=self.text_color,
+                                     selectcolor=self.bg_dark,
+                                     cursor="hand2")
+        spirit_check.pack(side=tk.LEFT)
+        
+        self.refilled_btn = tk.Button(spirit_frame, text="Refilled",
+                                     command=self._on_spirits_refilled,
+                                     bg=self.accent_blue, fg="#000000",
+                                     font=("Segoe UI", 9, "bold"),
+                                     relief=tk.FLAT, cursor="hand2", padx=8)
+        # Hidden by default, shown when spirits run out
+        
+        tk.Label(spirit_frame, text="(must be in principal bag)",
+                font=("Segoe UI", 8, "italic"),
+                bg=self.bg_medium, fg=self.text_secondary).pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Counter and Max Merges Row
+        counter_frame = tk.Frame(merge_container, bg=self.bg_medium)
+        counter_frame.pack(fill=tk.X, pady=(0, 8))
+        
+        tk.Label(counter_frame, text="Merged Pets:", font=("Segoe UI", 10),
+                bg=self.bg_medium, fg=self.text_color).pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.merged_count_label = tk.Label(counter_frame, text="0",
+                                          font=("Segoe UI", 12, "bold"),
+                                          bg=self.bg_medium, fg=self.accent_green)
+        self.merged_count_label.pack(side=tk.LEFT, padx=(0, 20))
+        
+        tk.Label(counter_frame, text="Max Merges:", font=("Segoe UI", 10),
+                bg=self.bg_medium, fg=self.text_color).pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.max_merges_var = tk.StringVar(value="999")
+        max_merges_entry = tk.Entry(counter_frame, textvariable=self.max_merges_var,
+                                   font=("Segoe UI", 10), width=5,
+                                   bg=self.bg_light, fg=self.text_color,
+                                   insertbackground=self.text_color,
+                                   relief=tk.FLAT, borderwidth=3)
+        max_merges_entry.pack(side=tk.LEFT)
+        
+        # Final Pet and AFK Spot Row
+        final_frame = tk.Frame(merge_container, bg=self.bg_medium)
+        final_frame.pack(fill=tk.X, pady=(0, 8))
+        
+        tk.Label(final_frame, text="Final Carry Pet:", font=("Segoe UI", 10),
+                bg=self.bg_medium, fg=self.text_color).pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.final_pet_var = tk.StringVar(value="1")
+        final_spin = tk.Spinbox(final_frame, from_=1, to=8, width=3,
+                               textvariable=self.final_pet_var,
+                               font=("Segoe UI", 10),
+                               bg=self.bg_light, fg=self.text_color,
+                               buttonbackground=self.bg_light)
+        final_spin.pack(side=tk.LEFT, padx=(0, 15))
+        
+        tk.Label(final_frame, text="AFK Spot:", font=("Segoe UI", 10),
+                bg=self.bg_medium, fg=self.text_color).pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.afk_spot_var = tk.StringVar(value="Thermopylae")
+        afk_dropdown = tk.OptionMenu(final_frame, self.afk_spot_var, "Thermopylae", "Larissa")
+        afk_dropdown.config(
+            bg=self.bg_light, fg=self.text_color, font=("Segoe UI", 9),
+            activebackground=self.bg_light, highlightthickness=0, width=12
+        )
+        afk_dropdown.pack(side=tk.LEFT)
+        
+        # Enable and Start Buttons Row
+        buttons_frame = tk.Frame(merge_container, bg=self.bg_medium)
+        buttons_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        self.enable_merge_var = tk.BooleanVar(value=False)
+        enable_check = tk.Checkbutton(buttons_frame, text="Enable Auto Merge",
+                                     variable=self.enable_merge_var,
+                                     font=("Segoe UI", 10, "bold"),
+                                     bg=self.bg_medium, fg=self.accent_orange,
+                                     activebackground=self.bg_medium,
+                                     activeforeground=self.accent_orange,
+                                     selectcolor=self.bg_dark,
+                                     cursor="hand2")
+        enable_check.pack(side=tk.LEFT)
+        
+        self.start_merge_btn = tk.Button(buttons_frame, text="▶ Start Auto Merge",
+                                        command=self._on_start_merge,
+                                        bg=self.accent_orange, fg="#000000",
+                                        font=("Segoe UI", 10, "bold"),
+                                        relief=tk.FLAT, cursor="hand2", padx=15)
+        self.start_merge_btn.pack(side=tk.RIGHT)
+    
+    def _toggle_lock_account(self):
+        """Toggle account lock for Auto Merge"""
+        if self.merge_locked_account is None:
+            # Try to lock selected account
+            selected = self.merge_account_var.get()
+            if selected == "Select Account":
+                messagebox.showwarning("Warning", "Please select an account first!")
+                return
+            
+            # Find PID from account name
+            for pid, info in self.accounts.items():
+                if info['name'] == selected:
+                    self.merge_locked_account = pid
+                    self.lock_account_btn.config(text="🔒 Locked", bg=self.accent_orange, fg="#000000")
+                    self.merge_account_dropdown.config(state=tk.DISABLED)
+                    self.log(f"🔒 Account locked for Auto Merge: {selected}")
+                    return
+            
+            messagebox.showerror("Error", "Could not find selected account!")
+        else:
+            # Unlock - requires restart
+            messagebox.showinfo("Info", "To unlock the account, please restart the application.")
+    
+    def _validate_provider_slot(self):
+        """Ensure provider slot is always greater than receiver slot"""
+        try:
+            receiver = int(self.receiver_slot_var.get())
+            provider = int(self.provider_slot_var.get())
+            
+            if provider <= receiver:
+                self.provider_slot_var.set(str(receiver + 1))
+            
+            # Update spinbox minimum
+            self.provider_spin.config(from_=receiver + 1)
+        except ValueError:
+            pass
+    
+    def _on_spirits_refilled(self):
+        """Handle when user indicates spirits have been refilled"""
+        self.merge_spirits_available = True
+        self.refilled_btn.pack_forget()
+        self.log("✓ Merged Spirits refilled - will use in next merge")
+    
+    def _on_start_merge(self):
+        """Start the Auto Merge process manually"""
+        if self.merge_locked_account is None:
+            messagebox.showwarning("Warning", "Please lock an account first!")
+            return
+        
+        # Get configuration
+        self.merge_config['receiver_slot'] = int(self.receiver_slot_var.get()) - 1  # Convert to 0-based
+        self.merge_config['provider_slot'] = int(self.provider_slot_var.get()) - 1
+        self.merge_config['use_merged_spirit'] = self.use_spirit_var.get()
+        self.merge_config['max_merges'] = int(self.max_merges_var.get())
+        self.merge_config['final_pet_slot'] = int(self.final_pet_var.get()) - 1
+        self.merge_config['afk_spot'] = self.afk_spot_var.get().lower()
+        
+        # Validate slots
+        if self.merge_config['provider_slot'] <= self.merge_config['receiver_slot']:
+            messagebox.showerror("Error", "Provider pet slot must be greater than receiver pet slot!")
+            return
+        
+        self.log(f"🔀 Starting Auto Merge...")
+        self.log(f"   Receiver: Pet {self.merge_config['receiver_slot'] + 1}")
+        self.log(f"   Provider: Pet {self.merge_config['provider_slot'] + 1}")
+        self.log(f"   AFK Spot: {self.afk_spot_var.get()}")
+        
+        # Start merge in separate thread
+        import threading
+        from pet_manager import get_window_by_pid, bring_window_to_front
+        from auto_merge import run_auto_merge
+        
+        def run_merge():
+            try:
+                hwnd = get_window_by_pid(self.merge_locked_account)
+                if not hwnd:
+                    self.root.after(0, lambda: self.log("❌ Could not find game window"))
+                    return
+                
+                window = bring_window_to_front(hwnd)
+                if not window:
+                    self.root.after(0, lambda: self.log("❌ Could not bring window to front"))
+                    return
+                
+                # Get total pets to merge based on ignored pets
+                account_name = self.accounts[self.merge_locked_account]['name']
+                ignored = len(self.ignored_pets.get(account_name, []))
+                self.merge_config['total_pets_to_merge'] = 8 - ignored - 1  # Minus 1 for receiver
+                
+                result = run_auto_merge(window, self.merge_config, gui_callback=self)
+                
+                if result['success']:
+                    self.root.after(0, lambda: self._update_merge_count(result['merges_completed']))
+                    self.root.after(0, lambda: self.log(f"✓ Auto Merge complete! {result['merges_completed']} pets merged"))
+                else:
+                    self.root.after(0, lambda: self.log(f"❌ Auto Merge failed: {result.get('error', 'Unknown error')}"))
+                    
+            except Exception as e:
+                self.root.after(0, lambda: self.log(f"❌ Auto Merge error: {str(e)}"))
+        
+        merge_thread = threading.Thread(target=run_merge, daemon=True)
+        merge_thread.start()
+    
+    def _update_merge_count(self, count):
+        """Update the merged pets counter"""
+        self.merged_pets_count += count
+        self.merged_count_label.config(text=str(self.merged_pets_count))
+    
+    def _update_merge_account_dropdown(self):
+        """Update the account dropdown with current accounts"""
+        menu = self.merge_account_dropdown["menu"]
+        menu.delete(0, "end")
+        
+        for pid, info in self.accounts.items():
+            menu.add_command(label=info['name'],
+                           command=lambda v=info['name']: self.merge_account_var.set(v))
+    
+    def _setup_left_panel(self, parent):
+        """Setup the Auto Level panel (formerly main UI)"""
+        # Header
+        header_frame = tk.Frame(parent, bg=self.bg_medium, pady=10)
         header_frame.pack(fill=tk.X)
         
-        tk.Label(header_frame, text="🐾 Pet Factory", font=("Segoe UI", 24, "bold"), 
+        tk.Label(header_frame, text="📈 Auto Level", font=("Segoe UI", 14, "bold"), 
                 bg=self.bg_medium, fg=self.accent_green).pack()
         
         # Main container
@@ -223,7 +517,7 @@ class PetFactoryGUI:
         buttons_frame = tk.Frame(main_frame, bg=self.bg_dark)
         buttons_frame.pack(fill=tk.X, pady=(10, 0))
         
-        self.start_btn = tk.Button(buttons_frame, text="▶ Start", 
+        self.start_btn = tk.Button(buttons_frame, text="▶ Start Auto Level", 
                                    command=self.on_start,
                                    bg=self.accent_green, fg="#000000", 
                                    font=("Segoe UI", 14, "bold"),
@@ -623,6 +917,9 @@ class PetFactoryGUI:
                 'pets_done': 0,
                 'status': 'Idle'
             }
+        
+        # Update Auto Merge account dropdown
+        self._update_merge_account_dropdown()
     
     def on_start(self):
         """Handle Start button click"""
@@ -748,7 +1045,7 @@ class PetFactoryGUI:
         """Show management results in logs"""
         # Restore Start button
         self.is_running = False
-        self.start_btn.config(text="▶ Start", bg=self.accent_green, state=tk.NORMAL)
+        self.start_btn.config(text="▶ Start Auto Level", bg=self.accent_green, state=tk.NORMAL)
         
         self.log("=" * 40)
         self.log("Pet Management Complete")
