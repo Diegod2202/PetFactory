@@ -23,8 +23,8 @@ LARISSA_WAIT = 65  # 1 minute 5 seconds
 MYCENAE_WAIT = 2
 
 # Click delays
-CLICK_DELAY = 0.5
-SPIRIT_CLICK_DELAY = 0.3
+CLICK_DELAY = 0.8  # Increased from 0.5 to 0.8 for more reliable clicks
+SPIRIT_CLICK_DELAY = 0.5  # Increased from 0.3 to 0.5
 PET_BAG_DELAY = 1.0
 
 # Merge settings
@@ -49,14 +49,20 @@ def check_merge_stop():
 
 
 def click_at_window_position(window, rel_x, rel_y, delay=None, button='left'):
-    """Click at position relative to window"""
+    """Click at position relative to window with proper delays"""
     if delay is None:
         delay = CLICK_DELAY
     
     abs_x = window.left + rel_x
     abs_y = window.top + rel_y
+    
+    # Move to position first and wait
+    pyautogui.moveTo(abs_x, abs_y)
+    time.sleep(0.2)  # Wait for UI to register hover
+    
+    # Click
     pyautogui.click(abs_x, abs_y, button=button)
-    time.sleep(delay)
+    time.sleep(delay)  # Use configured delay
 
 
 def drag_to_corner(window):
@@ -82,8 +88,8 @@ def drag_to_corner(window):
 def drag_element_to_target(window, from_coord, to_coord):
     """
     Drag from one position to another within a window.
-    Does 4 mini drag-and-drops of 1 pixel to ensure the element is grabbed,
-    then moves to the final target position.
+    Does mini drag-and-drops to ensure the element is grabbed,
+    then moves to the final target position slowly and carefully.
     Coordinates are relative to the window.
     """
     start_x = window.left + from_coord[0]
@@ -93,34 +99,44 @@ def drag_element_to_target(window, from_coord, to_coord):
     
     # Ensure mouse is released first (clean state)
     pyautogui.mouseUp()
-    time.sleep(0.1)
+    time.sleep(0.3)  # Increased wait
     
-    # Do 2 mini drag-and-drops to ensure element is grabbed
-    for i in range(2):
+    # Move to the starting position first and wait
+    pyautogui.moveTo(start_x, start_y)
+    time.sleep(0.5)  # Give UI time to register hover
+    
+    # Do 3 mini drag-and-drops to ensure element is grabbed
+    for i in range(3):
         pyautogui.moveTo(start_x + i, start_y)
-        time.sleep(0.1)
+        time.sleep(0.15)
         pyautogui.mouseDown()
+        time.sleep(0.2)  # Hold down longer
+        pyautogui.moveTo(start_x + i + 1, start_y, duration=0.15)
         time.sleep(0.1)
-        pyautogui.moveTo(start_x + i + 1, start_y, duration=0.1)
-        time.sleep(0.05)
         pyautogui.mouseUp()
-        time.sleep(0.1)
+        time.sleep(0.15)
     
     # Now do the final drag to the target
-    pyautogui.moveTo(start_x + 2, start_y)
-    time.sleep(0.2)
+    pyautogui.moveTo(start_x + 3, start_y)
+    time.sleep(0.3)
     pyautogui.mouseDown()
-    time.sleep(0.2)
+    time.sleep(0.3)  # Hold before moving
     
-    # Move to destination slowly
-    pyautogui.moveTo(end_x, end_y, duration=0.5)
-    time.sleep(0.2)
+    # Move to destination SLOWLY (increased duration)
+    pyautogui.moveTo(end_x, end_y, duration=0.8)
+    time.sleep(0.3)
     
-    # Click at destination to place
-    pyautogui.click(end_x, end_y)
-    time.sleep(0.1)
+    # Release at destination
     pyautogui.mouseUp()
-    time.sleep(0.5)
+    time.sleep(0.2)
+    
+    # Click at destination to confirm placement
+    pyautogui.click(end_x, end_y)
+    time.sleep(0.2)
+    
+    # Final release to be sure
+    pyautogui.mouseUp()
+    time.sleep(0.8)  # Increased final wait for UI to update
 
 
 # =============================================================================
@@ -481,6 +497,90 @@ def close_all_interfaces(window):
             break
     
     print("[AUTO_MERGE] Closed interfaces")
+
+
+# =============================================================================
+# STEP 15.5: APPLY FEATHER (EVERY 7 MERGES)
+# =============================================================================
+
+def apply_feather(window):
+    """
+    Step 15.5: Apply feather at Pet Manager NPC
+    - Search for Pet Manager NPC (retry until found)
+    - Click 290px below the NPC
+    - Click Points button
+    - Click Savvy button
+    - Click OK three times
+    """
+    check_merge_stop()
+    print("[AUTO_MERGE] Starting feather application process...")
+    
+    # Search for Pet Manager NPC (with retry like Transporter)
+    print("[AUTO_MERGE] Searching for Pet Manager NPC...")
+    while True:
+        check_merge_stop()
+        pet_manager_coords = get_ui_coord(window, "PET_MANAGER_NPC")
+        if pet_manager_coords:
+            # Click 290px below the found NPC position
+            target_x = pet_manager_coords[0]
+            target_y = pet_manager_coords[1] + 290
+            
+            # Calculate absolute screen coordinates
+            abs_x = window.left + target_x
+            abs_y = window.top + target_y
+            
+            # Move mouse and wait for inertia to stop
+            pyautogui.moveTo(abs_x, abs_y)
+            time.sleep(1.0)
+            
+            # Click and wait for dialog
+            pyautogui.click()
+            time.sleep(2.5)
+            print("[AUTO_MERGE] Clicked Pet Manager NPC")
+            break
+        time.sleep(0.5)
+    
+    # Click Points button (retry until found)
+    check_merge_stop()
+    print("[AUTO_MERGE] Searching for Points button...")
+    while True:
+        check_merge_stop()
+        points_coords = get_ui_coord(window, "POINTS")
+        if points_coords:
+            click_at_window_position(window, points_coords[0], points_coords[1])
+            time.sleep(0.5)
+            print("[AUTO_MERGE] Clicked Points")
+            break
+        time.sleep(0.5)
+    
+    # Click Savvy button (retry until found)
+    check_merge_stop()
+    print("[AUTO_MERGE] Searching for Savvy button...")
+    while True:
+        check_merge_stop()
+        savvy_coords = get_ui_coord(window, "SAVVY")
+        if savvy_coords:
+            click_at_window_position(window, savvy_coords[0], savvy_coords[1])
+            time.sleep(0.5)
+            print("[AUTO_MERGE] Clicked Savvy")
+            break
+        time.sleep(0.5)
+    
+    # Click OK three times (retry each time until found)
+    for i in range(3):
+        check_merge_stop()
+        print(f"[AUTO_MERGE] Searching for OK button (click {i+1}/3)...")
+        while True:
+            check_merge_stop()
+            ok_coords = get_ui_coord(window, "OK")
+            if ok_coords:
+                click_at_window_position(window, ok_coords[0], ok_coords[1])
+                time.sleep(0.5)
+                print(f"[AUTO_MERGE] Clicked OK ({i+1}/3)")
+                break
+            time.sleep(0.5)
+    
+    print("[AUTO_MERGE] Feather application complete")
 
 
 # =============================================================================
@@ -923,26 +1023,12 @@ def run_auto_merge(window, config, gui_callback=None):
         # Step 14: Collect new pets from bag
         pets_collected = collect_new_pets(window, provider_slot)
         
-        # Set carry based on whether we found new pets
-        if pets_collected > 0:
-            # New pets found, set provider slot pet to carry
-            pet_coords = get_pet_coord(window, provider_slot)
-            if pet_coords:
-                click_at_window_position(window, pet_coords[0], pet_coords[1])
-                carry_coords = get_ui_coord(window, "CARRY")
-                if carry_coords:
-                    click_at_window_position(window, carry_coords[0], carry_coords[1])
-        else:
-            # No new pets, keep receiver as carry
-            pet_coords = get_pet_coord(window, receiver_slot)
-            if pet_coords:
-                click_at_window_position(window, pet_coords[0], pet_coords[1])
-                carry_coords = get_ui_coord(window, "CARRY")
-                if carry_coords:
-                    click_at_window_position(window, carry_coords[0], carry_coords[1])
-        
         # Step 15: Close all interfaces
         close_all_interfaces(window)
+        
+        # Step 15.5: Apply feather (every 7 merges)
+        log("[AUTO_MERGE] Applying feather at Pet Manager NPC...")
+        apply_feather(window)
         
         # Steps 16-23: Travel to AFK spot
         if not travel_to_afk_spot(window, afk_spot):
