@@ -966,6 +966,7 @@ def run_auto_merge(window, config, gui_callback=None):
     max_merges = config.get('max_merges', 999)
     final_pet_slot = config.get('final_pet_slot', 0)
     afk_spot = config.get('afk_spot', 'thermopylae')
+    should_apply_feather = config.get('apply_feather', True)  # Default True for backwards compatibility
     # Calculate total pets to merge based on provider slot
     # If provider is slot 6 (index 5), we can merge slots 6, 7, 8 = 3 pets
     total_to_merge = 8 - provider_slot  # e.g., provider slot 6 (index 5) -> 8-5 = 3 merges
@@ -1026,9 +1027,55 @@ def run_auto_merge(window, config, gui_callback=None):
         # Step 15: Close all interfaces
         close_all_interfaces(window)
         
-        # Step 15.5: Apply feather (every 7 merges)
-        log("[AUTO_MERGE] Applying feather at Pet Manager NPC...")
-        apply_feather(window)
+        # Step 15.5: Set receiver pet to carry before feather application
+        log(f"[AUTO_MERGE] Setting receiver pet {receiver_slot + 1} to Carry before feather...")
+        
+        # Open Pet Tab (retry until found)
+        print("[AUTO_MERGE] Searching for Pet Tab...")
+        while True:
+            check_merge_stop()
+            pet_tab_coords = get_ui_coord(window, "PET_TAB")
+            if pet_tab_coords:
+                click_at_window_position(window, pet_tab_coords[0], pet_tab_coords[1])
+                time.sleep(0.5)
+                break
+            time.sleep(0.5)
+        
+        # Click receiver pet (retry until found)
+        print(f"[AUTO_MERGE] Searching for receiver pet {receiver_slot + 1}...")
+        while True:
+            check_merge_stop()
+            pet_coords = get_pet_coord(window, receiver_slot)
+            if pet_coords:
+                click_at_window_position(window, pet_coords[0], pet_coords[1])
+                time.sleep(0.3)
+                break
+            time.sleep(0.5)
+        
+        # Click Carry button (retry until found)
+        print("[AUTO_MERGE] Searching for Carry button...")
+        while True:
+            check_merge_stop()
+            carry_coords = get_ui_coord(window, "CARRY")
+            if carry_coords:
+                click_at_window_position(window, carry_coords[0], carry_coords[1])
+                log(f"[AUTO_MERGE] Set receiver pet {receiver_slot + 1} to Carry")
+                time.sleep(0.3)
+                break
+            time.sleep(0.5)
+        
+        # Close pet window
+        close_coords = get_ui_coord(window, "CLOSE_PET")
+        if close_coords:
+            click_at_window_position(window, close_coords[0], close_coords[1])
+            time.sleep(0.3)
+        
+        # Step 15.6: Apply feather (every 7 merges) - only if enabled
+        if should_apply_feather:
+            log("[AUTO_MERGE] Applying feather at Pet Manager NPC...")
+            apply_feather(window)
+        else:
+            log("[AUTO_MERGE] Feather application skipped (disabled in config)")
         
         # Steps 16-23: Travel to AFK spot
         if not travel_to_afk_spot(window, afk_spot):

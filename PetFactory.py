@@ -207,6 +207,17 @@ class PetFactoryGUI:
                 font=("Segoe UI", 7, "italic"),
                 bg=self.bg_medium, fg=self.text_secondary).pack(anchor=tk.W, pady=(0, 6))
         
+        # Apply Feather Checkbox
+        feather_row = tk.Frame(merge_container, bg=self.bg_medium)
+        feather_row.pack(fill=tk.X, pady=(0, 6))
+        
+        self.apply_feather_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(feather_row, text="Apply Feather after merges",
+                      variable=self.apply_feather_var, font=("Segoe UI", 9),
+                      bg=self.bg_medium, fg=self.text_color,
+                      activebackground=self.bg_medium, selectcolor=self.bg_dark,
+                      cursor="hand2").pack(side=tk.LEFT)
+        
         # Merged Count & Max
         count_row = tk.Frame(merge_container, bg=self.bg_medium)
         count_row.pack(fill=tk.X, pady=(0, 6))
@@ -321,6 +332,7 @@ class PetFactoryGUI:
         self.merge_config['max_merges'] = int(self.max_merges_var.get())
         self.merge_config['final_pet_slot'] = int(self.final_pet_var.get()) - 1
         self.merge_config['afk_spot'] = self.afk_spot_var.get().lower()
+        self.merge_config['apply_feather'] = self.apply_feather_var.get()
         
         # Validate slots
         if self.merge_config['provider_slot'] <= self.merge_config['receiver_slot']:
